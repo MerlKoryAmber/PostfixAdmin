@@ -24,8 +24,8 @@ echo -e "\n${GREEN}Installing system dependencies...${NC}"
 dnf install -y epel-release
 dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl
 
-echo -e "\n${GREEN}Installing Flask-Login (pure Python)...${NC}"
-pip3 install --no-binary :all: flask-login
+echo -e "\n${GREEN}Installing Flask-Login...${NC}"
+pip3 install flask-login
 
 echo -e "\n${GREEN}Creating application user...${NC}"
 useradd -r -s /sbin/nologin -d $INSTALL_DIR $APP_USER 2>/dev/null || true
@@ -45,18 +45,13 @@ openssl req -x509 -nodes -days 3650 -newkey rsa:4096 \
     -out /etc/nginx/ssl/postfix-admin.crt \
     -subj "/C=RU/ST=Moscow/L=Moscow/O=InterROS/CN=$(hostname -I | awk '{print $1}')"
 
-# Устанавливаем права на ключ и сертификат
 chmod 600 /etc/nginx/ssl/postfix-admin.key
 chmod 644 /etc/nginx/ssl/postfix-admin.crt
 
 echo -e "\n${GREEN}Configuring Nginx...${NC}"
-# Удаляем дефолтный конфиг, если он есть (чтобы не было конфликтов)
 rm -f /etc/nginx/conf.d/default.conf
-# Копируем наш конфиг
 cp $INSTALL_DIR/deploy/nginx-https.conf /etc/nginx/conf.d/postfix-admin.conf
 
-# Проверяем конфигурацию Nginx
-echo -e "\n${YELLOW}Testing Nginx configuration...${NC}"
 if nginx -t 2>&1; then
     echo -e "${GREEN}Nginx configuration is OK.${NC}"
 else
@@ -92,7 +87,6 @@ echo -e "\n${GREEN}Setting permissions...${NC}"
 chown -R $APP_USER:$APP_GROUP $INSTALL_DIR
 usermod -a -G postfix $APP_USER
 
-# Инициализация пустых JSON-файлов
 echo "{}" > $INSTALL_DIR/users.json
 chown $APP_USER:$APP_GROUP $INSTALL_DIR/users.json
 chmod 640 $INSTALL_DIR/users.json
@@ -113,7 +107,7 @@ echo -e "\n${GREEN}Firewall...${NC}"
 firewall-cmd --permanent --add-service=http --add-service=https 2>/dev/null || true
 firewall-cmd --reload 2>/dev/null || true
 
-# --- Запуск сервисов с проверкой ---
+# Запуск с проверкой
 echo -e "\n${GREEN}Starting postfix-admin...${NC}"
 systemctl start postfix-admin
 sleep 2
@@ -136,13 +130,19 @@ else
     exit 1
 fi
 
-# Проверяем порт 443
 echo -e "\n${GREEN}Checking listening ports...${NC}"
-if ss -tlnp | grep ':443 '; then
-    echo -e "${GREEN}Port 443 is listening.${NC}"
+if ss -tlnp | grep ':443 ' && ss -tlnp | grep ':8000 '; then
+    echo -e "${GREEN}Both ports 443 and 8000 are listening.${NC}"
 else
-    echo -e "${RED}Port 443 is NOT listening! Something went wrong.${NC}"
-    echo -e "Check Nginx configuration and SELinux."
+    echo -e "${RED}Port missing! Something went wrong.${NC}"
+fi
+
+# Проверка доступности Flask через curl
+sleep 2
+if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/ | grep -q '302\|200'; then
+    echo -e "${GREEN}Flask is responding.${NC}"
+else
+    echo -e "${RED}Flask not reachable on port 8000!${NC}"
 fi
 
 # --- Создание администратора ---
@@ -158,8 +158,7 @@ if [[ "$CREATE_ADMIN" =~ ^[Yy]$ ]]; then
     chown $APP_USER:$APP_GROUP $INSTALL_DIR/users.json
     echo -e "${GREEN}Admin user created successfully!${NC}"
 else
-    echo -e "${YELLOW}Skipping admin creation. You can create one later by running:${NC}"
-    echo -e "cd $INSTALL_DIR && flask create-user && chown $APP_USER:$APP_GROUP users.json"
+    echo -e "${YELLOW}Skipping admin creation.${NC}"
 fi
 
 echo -e "\n${GREEN}=========================================${NC}"

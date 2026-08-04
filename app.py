@@ -24,14 +24,12 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24).hex())
 
-# --- HTTPS Configuration ---
 app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
 )
 
-# --- File Paths ---
 TRANSPORT_FILE = '/etc/postfix/transport'
 MAIN_CF_FILE = '/etc/postfix/main.cf'
 USERS_FILE = os.environ.get('USERS_FILE', '/opt/postfix-admin/users.json')
@@ -55,7 +53,7 @@ def save_ip_whitelist(ip_list):
 
 def is_ip_allowed(ip_str):
     whitelist = load_ip_whitelist()
-    if not whitelist:  # пустой список – доступ открыт
+    if not whitelist:
         return True
     try:
         client_ip = ipaddress.ip_address(ip_str)
@@ -70,12 +68,10 @@ def is_ip_allowed(ip_str):
             continue
     return False
 
-# --- Проверка IP перед каждым запросом ---
 @app.before_request
 def limit_remote_addr():
     if request.path.startswith('/static/'):
         return
-    # Исключаем страницу входа, чтобы можно было ввести логин с любого IP
     if request.path == url_for('login') and request.method == 'GET':
         return
     client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
@@ -95,7 +91,6 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# --- User Management ---
 def load_users():
     try:
         if os.path.exists(USERS_FILE):
@@ -198,45 +193,34 @@ IMPORTANT_PARAMS = {
     }
 }
 
-# --- File Operations ---
 def atomic_write_file(filepath, content):
     temp_file = filepath + '.tmp'
     lock_file = filepath + '.lock'
-    
     try:
         with open(lock_file, 'w') as lock:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            
             if os.path.exists(filepath):
                 shutil.copy2(filepath, filepath + '.bak')
-            
             with open(temp_file, 'w') as f:
                 f.write(content)
-            
             os.replace(temp_file, filepath)
             return True, None
-            
     except (IOError, OSError) as e:
         return False, str(e)
     finally:
         for f in [lock_file, temp_file]:
             if os.path.exists(f):
-                try:
-                    os.unlink(f)
-                except:
-                    pass
+                try: os.unlink(f)
+                except: pass
 
-# --- Parsers ---
 def parse_main_cf():
     params = {}
     if not os.path.exists(MAIN_CF_FILE):
         return params
-
     with open(MAIN_CF_FILE, 'r') as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith('#'):
-                continue
+            if not line or line.startswith('#'): continue
             if '=' in line:
                 key, value = line.split('=', 1)
                 key = key.strip()
@@ -256,18 +240,13 @@ def parse_transport():
     entries = []
     if not os.path.exists(TRANSPORT_FILE):
         return entries
-
     with open(TRANSPORT_FILE, 'r') as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith('#'):
-                continue
+            if not line or line.startswith('#'): continue
             parts = line.split()
             if len(parts) >= 2:
-                entries.append({
-                    'domain': parts[0],
-                    'destination': parts[1]
-                })
+                entries.append({'domain': parts[0], 'destination': parts[1]})
     return entries
 
 def parse_sender_transport():
@@ -275,12 +254,10 @@ def parse_sender_transport():
     entries = []
     if not os.path.exists(sender_file):
         return entries
-
     with open(sender_file, 'r') as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith('#'):
-                continue
+            if not line or line.startswith('#'): continue
             parts = line.split()
             if len(parts) >= 2:
                 options = {}
@@ -288,82 +265,53 @@ def parse_sender_transport():
                     if '=' in part:
                         k, v = part.split('=', 1)
                         options[k] = v
-                entries.append({
-                    'sender': parts[0],
-                    'transport': parts[1],
-                    'options': options
-                })
+                entries.append({'sender': parts[0], 'transport': parts[1], 'options': options})
     return entries
 
 def parse_log_line(line):
-    result = {
-        'timestamp': '',
-        'from': '',
-        'to': '',
-        'status': '',
-        'relay': '',
-        'raw': line
-    }
+    result = {'timestamp': '', 'from': '', 'to': '', 'status': '', 'relay': '', 'raw': line}
     if len(line) >= 15:
         result['timestamp'] = line[:15].strip()
-    
     to_match = re.search(r'to=<([^>]+)>', line)
-    if to_match:
-        result['to'] = to_match.group(1)
-    
+    if to_match: result['to'] = to_match.group(1)
     from_match = re.search(r'from=<([^>]+)>', line)
-    if from_match:
-        result['from'] = from_match.group(1)
-    
+    if from_match: result['from'] = from_match.group(1)
     status_match = re.search(r'status=(\S+)', line)
-    if status_match:
-        result['status'] = status_match.group(1)
-    
+    if status_match: result['status'] = status_match.group(1)
     relay_match = re.search(r'relay=([^\s,]+)', line)
-    if relay_match:
-        result['relay'] = relay_match.group(1)
-    
+    if relay_match: result['relay'] = relay_match.group(1)
     return result
 
 def sanitize_input(value):
-    if not value:
-        return ''
+    if not value: return ''
     value = value.strip()
-    dangerous_chars = [';', '|', '&', '$', '`', '(', ')', '{', '}', '<', '>', '\n', '\r']
-    for char in dangerous_chars:
+    for char in [';','|','&','$','`','(',')','{','}','<','>','\n','\r']:
         value = value.replace(char, '')
     return value
 
-# --- Routes ---
+# ===== ROUTES =====
 @app.route('/')
 @login_required
 def index():
     return redirect(url_for('main_config'))
 
-@app.route('/login', methods=['GET', 'POST'])
+@app.route('/login', methods=['GET','POST'])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('index'))
-        
     if request.method == 'POST':
-        username = sanitize_input(request.form.get('username', ''))
-        password = request.form.get('password', '')
-
+        username = sanitize_input(request.form.get('username',''))
+        password = request.form.get('password','')
         if not username or not password:
             flash('Please enter username and password', 'danger')
             return render_template('login.html')
-
         users = load_users()
-        
-        if username in users:
-            if check_password_hash(users[username]['password'], password):
-                user = User(username, users[username].get('role', 'user'))
-                login_user(user)
-                flash('Login successful', 'success')
-                return redirect(url_for('index'))
-
+        if username in users and check_password_hash(users[username]['password'], password):
+            user = User(username, users[username].get('role','user'))
+            login_user(user)
+            flash('Login successful', 'success')
+            return redirect(url_for('index'))
         flash('Invalid username or password', 'danger')
-
     return render_template('login.html')
 
 @app.route('/logout')
@@ -373,7 +321,7 @@ def logout():
     flash('You have been logged out', 'info')
     return redirect(url_for('login'))
 
-# --- User Management Routes ---
+# --- User Management ---
 @app.route('/users')
 @login_required
 @admin_required
@@ -385,24 +333,17 @@ def list_users():
 @login_required
 @admin_required
 def add_user():
-    username = sanitize_input(request.form.get('username', ''))
-    password = request.form.get('password', '')
-    role = sanitize_input(request.form.get('role', 'user'))
-    
+    username = sanitize_input(request.form.get('username',''))
+    password = request.form.get('password','')
+    role = sanitize_input(request.form.get('role','user'))
     if not username or not password:
         flash('Username and password are required', 'danger')
         return redirect(url_for('list_users'))
-    
     users = load_users()
     if username in users:
         flash('User already exists', 'danger')
         return redirect(url_for('list_users'))
-    
-    users[username] = {
-        'password': generate_password_hash(password),
-        'role': role,
-        'created': datetime.now().isoformat()
-    }
+    users[username] = {'password': generate_password_hash(password), 'role': role, 'created': datetime.now().isoformat()}
     if save_users(users):
         flash(f'User {username} created', 'success')
     else:
@@ -431,7 +372,7 @@ def delete_user(username):
 @login_required
 @admin_required
 def admin_reset_password(username):
-    new_password = request.form.get('new_password', '')
+    new_password = request.form.get('new_password','')
     if not new_password:
         flash('Password cannot be empty', 'danger')
         return redirect(url_for('list_users'))
@@ -446,12 +387,12 @@ def admin_reset_password(username):
         flash('Error changing password', 'danger')
     return redirect(url_for('list_users'))
 
-@app.route('/profile', methods=['GET', 'POST'])
+@app.route('/profile', methods=['GET','POST'])
 @login_required
 def profile():
     if request.method == 'POST':
-        current_password = request.form.get('current_password', '')
-        new_password = request.form.get('new_password', '')
+        current_password = request.form.get('current_password','')
+        new_password = request.form.get('new_password','')
         if not current_password or not new_password:
             flash('All fields are required', 'danger')
             return redirect(url_for('profile'))
@@ -467,7 +408,7 @@ def profile():
         return redirect(url_for('profile'))
     return render_template('profile.html')
 
-# --- IP Whitelist Routes ---
+# --- IP Whitelist ---
 @app.route('/ip-whitelist')
 @login_required
 @admin_required
@@ -479,11 +420,10 @@ def ip_whitelist():
 @login_required
 @admin_required
 def add_ip():
-    ip = sanitize_input(request.form.get('ip', ''))
+    ip = sanitize_input(request.form.get('ip',''))
     if not ip:
         flash('IP address is required', 'danger')
         return redirect(url_for('ip_whitelist'))
-    # валидация
     try:
         ipaddress.ip_network(ip, strict=False)
     except ValueError:
@@ -511,7 +451,7 @@ def delete_ip(ip):
         flash('IP not found', 'danger')
     return redirect(url_for('ip_whitelist'))
 
-# --- Configuration routes (unchanged) ---
+# --- Configuration ---
 @app.route('/config')
 @login_required
 def main_config():
@@ -529,17 +469,13 @@ def save_config():
             flash(f"Parameter '{IMPORTANT_PARAMS[key]['name']}' is required", 'danger')
             return redirect(url_for('main_config'))
         new_params[key] = value
-
     if not os.path.exists(MAIN_CF_FILE):
         flash('main.cf file not found', 'danger')
         return redirect(url_for('main_config'))
-
     with open(MAIN_CF_FILE, 'r') as f:
         lines = f.readlines()
-
     updated_lines = []
     updated_params = set()
-    
     for line in lines:
         stripped = line.strip()
         if stripped and not stripped.startswith('#') and '=' in stripped:
@@ -549,18 +485,14 @@ def save_config():
                 updated_params.add(key)
                 continue
         updated_lines.append(line)
-
     for key, value in new_params.items():
         if key not in updated_params and value:
             updated_lines.append(f"\n{key} = {value}\n")
-
     success, error = atomic_write_file(MAIN_CF_FILE, ''.join(updated_lines))
-    
     if success:
         flash('Configuration updated successfully', 'success')
     else:
         flash(f'Error saving configuration: {error}', 'danger')
-
     return redirect(url_for('main_config'))
 
 @app.route('/config/reload')
@@ -575,12 +507,173 @@ def reload_postfix():
         flash(f'Error reloading Postfix: {e.stderr}', 'danger')
     return redirect(url_for('main_config'))
 
-# Transport routes unchanged...
-# (остальные роуты transport, sender-routing, logs, api/status оставлены без изменений, их полный код уже был выше)
-# ... здесь для краткости опущены, но они должны быть в реальном файле
+# --- Transport ---
+@app.route('/transport')
+@login_required
+def transport():
+    entries = parse_transport()
+    return render_template('transport.html', entries=entries)
 
-# --- Logs route (обновлённый с фильтрацией, как в предыдущем ответе) ---
-# ... (вставьте актуальную реализацию view_logs из предыдущего полного app.py)
+@app.route('/transport/add', methods=['POST'])
+@login_required
+@admin_required
+def add_transport():
+    domain = sanitize_input(request.form.get('domain',''))
+    destination = sanitize_input(request.form.get('destination',''))
+    if not domain or not destination:
+        flash('Domain and destination are required', 'danger')
+        return redirect(url_for('transport'))
+    entries = parse_transport()
+    if any(e['domain'] == domain for e in entries):
+        flash(f'Domain {domain} already exists', 'warning')
+        return redirect(url_for('transport'))
+    entries.append({'domain': domain, 'destination': destination})
+    content = "# Postfix transport map\n# Managed via web interface\n\n"
+    for entry in entries:
+        content += f"{entry['domain']}\t{entry['destination']}\n"
+    success, error = atomic_write_file(TRANSPORT_FILE, content)
+    if success:
+        subprocess.run(['/usr/sbin/postmap', TRANSPORT_FILE], check=True, capture_output=True)
+        flash(f'Transport added: {domain} → {destination}', 'success')
+    else:
+        flash(f'Error saving: {error}', 'danger')
+    return redirect(url_for('transport'))
+
+@app.route('/transport/delete/<path:domain>')
+@login_required
+@admin_required
+def delete_transport(domain):
+    entries = parse_transport()
+    entries = [e for e in entries if e['domain'] != domain]
+    content = "# Postfix transport map\n# Managed via web interface\n\n"
+    for entry in entries:
+        content += f"{entry['domain']}\t{entry['destination']}\n"
+    success, error = atomic_write_file(TRANSPORT_FILE, content)
+    if success:
+        subprocess.run(['/usr/sbin/postmap', TRANSPORT_FILE], check=True, capture_output=True)
+        flash(f'Transport deleted for {domain}', 'success')
+    else:
+        flash(f'Error: {error}', 'danger')
+    return redirect(url_for('transport'))
+
+# --- Sender Routing ---
+@app.route('/sender-routing')
+@login_required
+def sender_routing():
+    entries = parse_sender_transport()
+    return render_template('sender_routing.html', entries=entries)
+
+@app.route('/sender-routing/add', methods=['POST'])
+@login_required
+@admin_required
+def add_sender_routing():
+    sender = sanitize_input(request.form.get('sender',''))
+    transport = sanitize_input(request.form.get('transport',''))
+    if not sender or not transport:
+        flash('Sender and transport are required', 'danger')
+        return redirect(url_for('sender_routing'))
+    options = {}
+    if request.form.get('use_auth') == 'yes':
+        options['smtp_sasl_auth_enable'] = 'yes'
+        username = sanitize_input(request.form.get('smtp_username',''))
+        if username: options['smtp_username'] = username
+    entries = parse_sender_transport()
+    entries.append({'sender': sender, 'transport': transport, 'options': options})
+    sender_file = get_sender_transport_file()
+    content = "# Postfix sender-dependent relayhost map\n# Managed via web interface\n\n"
+    for entry in entries:
+        line = f"{entry['sender']}\t{entry['transport']}"
+        if entry.get('options'):
+            for k, v in entry['options'].items():
+                if v: line += f" {k}={v}"
+        content += line + "\n"
+    success, error = atomic_write_file(sender_file, content)
+    if success:
+        subprocess.run(['/usr/sbin/postmap', sender_file], check=True, capture_output=True)
+        flash(f'Routing rule added: {sender} → {transport}', 'success')
+    else:
+        flash(f'Error saving: {error}', 'danger')
+    return redirect(url_for('sender_routing'))
+
+@app.route('/sender-routing/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_sender_routing():
+    sender = sanitize_input(request.form.get('sender',''))
+    entries = parse_sender_transport()
+    entries = [e for e in entries if e['sender'] != sender]
+    sender_file = get_sender_transport_file()
+    content = "# Postfix sender-dependent relayhost map\n# Managed via web interface\n\n"
+    for entry in entries:
+        line = f"{entry['sender']}\t{entry['transport']}"
+        if entry.get('options'):
+            for k, v in entry['options'].items():
+                if v: line += f" {k}={v}"
+        content += line + "\n"
+    success, error = atomic_write_file(sender_file, content)
+    if success:
+        subprocess.run(['/usr/sbin/postmap', sender_file], check=True, capture_output=True)
+        flash(f'Routing rule deleted for {sender}', 'success')
+    else:
+        flash(f'Error: {error}', 'danger')
+    return redirect(url_for('sender_routing'))
+
+# --- Logs ---
+@app.route('/logs')
+@login_required
+def view_logs():
+    lines = []
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, 'r') as f:
+            all_lines = f.readlines()
+            lines = all_lines[-MAX_LOG_LINES:]
+    parsed = [parse_log_line(line.strip()) for line in lines]
+    from_filter = sanitize_input(request.args.get('from',''))
+    to_filter = sanitize_input(request.args.get('to',''))
+    status_filter = sanitize_input(request.args.get('status',''))
+    relay_filter = sanitize_input(request.args.get('relay',''))
+    search = sanitize_input(request.args.get('search',''))
+    filter_type = request.args.get('filter','all')
+    filtered = []
+    for entry in parsed:
+        if filter_type == 'errors' and not any(k in entry['raw'].lower() for k in ['error','fail','reject','warning']):
+            continue
+        if filter_type == 'postfix' and 'postfix' not in entry['raw'].lower():
+            continue
+        if search and search.lower() not in entry['raw'].lower():
+            continue
+        if from_filter and from_filter.lower() not in entry['from'].lower():
+            continue
+        if to_filter and to_filter.lower() not in entry['to'].lower():
+            continue
+        if status_filter and status_filter.lower() not in entry['status'].lower():
+            continue
+        if relay_filter and relay_filter.lower() not in entry['relay'].lower():
+            continue
+        filtered.append(entry)
+    return render_template('logs.html', logs=filtered, filter_type=filter_type, search=search,
+                           from_filter=from_filter, to_filter=to_filter,
+                           status_filter=status_filter, relay_filter=relay_filter)
+
+@app.route('/api/logs')
+@login_required
+def api_logs():
+    lines = []
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, 'r') as f:
+            all_lines = f.readlines()
+            lines = all_lines[-100:]
+    return jsonify({'lines': [l.strip() for l in lines]})
+
+@app.route('/api/status')
+@login_required
+def api_status():
+    try:
+        result = subprocess.run(['/usr/bin/systemctl', 'is-active', 'postfix'],
+                                capture_output=True, text=True, timeout=5)
+        return jsonify({'running': result.stdout.strip() == 'active', 'status': result.stdout.strip()})
+    except:
+        return jsonify({'running': False, 'error': 'Status check failed'})
 
 # --- CLI Commands ---
 @app.cli.command('create-user')
@@ -592,12 +685,8 @@ def create_user():
         click.echo('User already exists')
         return
     password = click.prompt('Password', hide_input=True, confirmation_prompt=True)
-    role = click.prompt('Role (admin/user)', default='user', type=click.Choice(['admin', 'user']))
-    users[username] = {
-        'password': generate_password_hash(password),
-        'role': role,
-        'created': datetime.now().isoformat()
-    }
+    role = click.prompt('Role (admin/user)', default='user', type=click.Choice(['admin','user']))
+    users[username] = {'password': generate_password_hash(password), 'role': role, 'created': datetime.now().isoformat()}
     if save_users(users):
         click.echo(f'User {username} created with role {role}')
 
@@ -607,7 +696,7 @@ def list_users_cli():
     if not users:
         print("No users found")
     for username, data in users.items():
-        print(f"{username} - {data.get('role', 'user')}")
+        print(f"{username} - {data.get('role','user')}")
 
 @app.errorhandler(404)
 def not_found(e):
@@ -629,4 +718,4 @@ if __name__ == '__main__':
     if not os.path.exists(IP_WHITELIST_FILE):
         with open(IP_WHITELIST_FILE, 'w') as f:
             json.dump([], f)
-    app.run(host='127.0.0.1', port=5000, debug=False)
+    app.run(host='127.0.0.1', port=8000, debug=False)
