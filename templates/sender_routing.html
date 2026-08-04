@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Sender-Dependent Routing</h2>
+    {% if current_user.role == 'admin' %}
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
+        + Add Rule
+    </button>
+    {% endif %}
+</div>
+
+<div class="alert alert-info">
+    <h5>How It Works</h5>
+    <p>Sender-dependent routing allows directing mail through different SMTP servers based on the sender address.</p>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Sender</th>
+                        <th>Transport</th>
+                        <th>Authentication</th>
+                        {% if current_user.role == 'admin' %}
+                        <th>Actions</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in entries %}
+                    <tr>
+                        <td><strong>{{ entry.sender }}</strong></td>
+                        <td><code>{{ entry.transport }}</code></td>
+                        <td>
+                            {% if entry.options.get('smtp_sasl_auth_enable') == 'yes' %}
+                            <span class="badge bg-success">Enabled</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Disabled</span>
+                            {% endif %}
+                        </td>
+                        {% if current_user.role == 'admin' %}
+                        <td>
+                            <form method="POST" action="{{ url_for('delete_sender_routing') }}" 
+                                  style="display: inline;"
+                                  onsubmit="return confirm('Delete rule?')">
+                                <input type="hidden" name="sender" value="{{ entry.sender }}">
+                                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                            </form>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="text-center text-muted">
+                            No routing rules configured
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% if current_user.role == 'admin' %}
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Routing Rule</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('add_sender_routing') }}">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="sender" class="form-label">Sender *</label>
+                                <input type="text" class="form-control" id="sender" name="sender" 
+                                       placeholder="user@example.com or @domain.com" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="transport" class="form-label">Transport *</label>
+                                <input type="text" class="form-control" id="transport" name="transport" 
+                                       placeholder="smtp:mail.example.com:587" required>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="use_auth" 
+                                   name="use_auth" value="yes"
+                                   onchange="document.getElementById('authFields').style.display = this.checked ? 'block' : 'none'">
+                            <label class="form-check-label" for="use_auth">
+                                Use authentication
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div id="authFields" style="display: none;">
+                        <div class="mb-3">
+                            <label for="smtp_username" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="smtp_username" name="smtp_username">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Rule</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Main Configuration</h2>
+    {% if current_user.role == 'admin' %}
+    <div>
+        <a href="{{ url_for('reload_postfix') }}" 
+           class="btn btn-success"
+           onclick="return confirm('Reload Postfix configuration?')">
+            ↻ Reload Postfix
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <form method="POST" action="{{ url_for('save_config') }}">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Configuration Parameters</h5>
+                </div>
+                <div class="card-body">
+                    {% for key, config in config_params.items() %}
+                    <div class="mb-3">
+                        <label for="{{ key }}" class="form-label">
+                            <strong>{{ config.name }}</strong>
+                            <small class="text-muted">({{ key }})</small>
+                        </label>
+                        
+                        {% if config.type == 'select' %}
+                        <select class="form-select" id="{{ key }}" name="{{ key }}"
+                                {% if not current_user.role == 'admin' %}disabled{% endif %}>
+                            <option value="">-- Not set --</option>
+                            {% for option in config.options %}
+                            <option value="{{ option }}" 
+                                    {% if params.get(key) == option %}selected{% endif %}>
+                                {{ option }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        
+                        {% elif config.type == 'number' %}
+                        <input type="number" class="form-control" id="{{ key }}" name="{{ key }}"
+                               value="{{ params.get(key, '') }}"
+                               {% if not current_user.role == 'admin' %}readonly{% endif %}>
+                        
+                        {% else %}
+                        <input type="text" class="form-control" id="{{ key }}" name="{{ key }}"
+                               value="{{ params.get(key, '') }}"
+                               {% if not current_user.role == 'admin' %}readonly{% endif %}>
+                        {% endif %}
+                        
+                        <div class="form-text">
+                            {{ config.description }}
+                            {% if config.required %}
+                            <span class="text-danger">* Required</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                
+                {% if current_user.role == 'admin' %}
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-primary">💾 Save Changes</button>
+                    <button type="reset" class="btn btn-secondary">↺ Reset</button>
+                </div>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card mb-3">
+            <div class="card-header">
+                <h6 class="mb-0">Postfix Status</h6>
+            </div>
+            <div class="card-body">
+                <div id="statusCheck">
+                    <button class="btn btn-outline-primary btn-sm w-100" onclick="checkStatus()">
+                        Check Status
+                    </button>
+                    <div id="statusResult" class="mt-2 small"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function checkStatus() {
+    const resultDiv = document.getElementById('statusResult');
+    resultDiv.innerHTML = '<div class="spinner-border spinner-border-sm"></div> Checking...';
+    
+    fetch('/api/status')
+        .then(response => response.json())
+        .then(data => {
+            if (data.running) {
+                resultDiv.innerHTML = '<span class="text-success">✅ Postfix is running</span>';
+            } else {
+                resultDiv.innerHTML = '<span class="text-danger">❌ Postfix is not running</span>';
+            }
+        });
+}
+
+document.addEventListener('DOMContentLoaded', checkStatus);
+</script>
+{% endblock %}
