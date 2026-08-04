@@ -59,16 +59,19 @@ else
     exit 1
 fi
 
-# --- Создание SUID‑скрипта для перезагрузки Postfix ---
-echo -e "\n${GREEN}Creating SUID wrapper for postfix reload...${NC}"
-cat > /usr/local/bin/postfix-reload << 'EOF'
-#!/bin/bash
-systemctl reload postfix
+# --- sudoers rule for postfix reload ---
+echo -e "\n${GREEN}Granting passwordless sudo for postfix reload...${NC}"
+cat > /etc/sudoers.d/postfix-admin << 'EOF'
+Defaults:postfixadmin !requiretty
+postfixadmin ALL=(root) NOPASSWD: /usr/sbin/postfix reload
 EOF
+chmod 440 /etc/sudoers.d/postfix-admin
 
-chown root:$APP_GROUP /usr/local/bin/postfix-reload
-chmod 750 /usr/local/bin/postfix-reload
-chmod u+s /usr/local/bin/postfix-reload
+# --- Раскомментируем includedir, если нужно ---
+if grep -q '^#includedir /etc/sudoers.d' /etc/sudoers; then
+    echo -e "\n${YELLOW}Uncommenting #includedir /etc/sudoers.d in /etc/sudoers...${NC}"
+    sed -i 's/^#includedir/includedir/' /etc/sudoers
+fi
 
 echo -e "\n${GREEN}Creating systemd service with Gunicorn...${NC}"
 SECRET_KEY=$(openssl rand -hex 32)
@@ -148,9 +151,7 @@ else
     echo -e "${RED}Nginx failed to start!${NC}"
     journalctl -u nginx --no-pager -n 10
     exit 1
-fi
-
-echo -e "\n${GREEN}Checking listening ports...${NC}"
+fiecho -e "\n${GREEN}Checking listening ports...${NC}"
 if ss -tlnp | grep ':443 ' && ss -tlnp | grep ':8000 '; then
     echo -e "${GREEN}Both ports 443 and 8000 are listening.${NC}"
 else

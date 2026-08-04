@@ -37,9 +37,6 @@ IP_WHITELIST_FILE = '/opt/postfix-admin/ip_whitelist.json'
 LOG_FILE = '/var/log/maillog'
 MAX_LOG_LINES = 500
 
-# Путь к SUID‑скрипту перезагрузки Postfix
-RELOAD_SCRIPT = '/usr/local/bin/postfix-reload'
-
 # --- IP Whitelist Management ---
 def load_ip_whitelist():
     if os.path.exists(IP_WHITELIST_FILE):
@@ -504,8 +501,9 @@ def reload_postfix():
     try:
         # Проверка конфигурации
         subprocess.run(['/usr/sbin/postfix', 'check'], check=True, capture_output=True, timeout=10)
-        # Перезагрузка через SUID-скрипт
-        result = subprocess.run([RELOAD_SCRIPT], capture_output=True, timeout=30)
+        # Перезагрузка через sudo
+        result = subprocess.run(['sudo', '/usr/sbin/postfix', 'reload'],
+                                capture_output=True, timeout=30)
         if result.returncode != 0:
             err = result.stderr.decode().strip() or result.stdout.decode().strip() or f"exit code {result.returncode}"
             flash(f'Error reloading Postfix: {err}', 'danger')
