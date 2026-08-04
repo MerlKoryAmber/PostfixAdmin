@@ -59,13 +59,16 @@ else
     exit 1
 fi
 
-# --- sudoers rule for postfix reload via systemctl ---
-echo -e "\n${GREEN}Granting passwordless sudo for postfix reload...${NC}"
-cat > /etc/sudoers.d/postfix-admin << 'EOF'
-Defaults:postfixadmin !requiretty
-postfixadmin ALL=(root) NOPASSWD: /usr/bin/systemctl reload postfix
+# --- Создание SUID‑скрипта для перезагрузки Postfix ---
+echo -e "\n${GREEN}Creating SUID wrapper for postfix reload...${NC}"
+cat > /usr/local/bin/postfix-reload << 'EOF'
+#!/bin/bash
+systemctl reload postfix
 EOF
-chmod 440 /etc/sudoers.d/postfix-admin
+
+chown root:$APP_GROUP /usr/local/bin/postfix-reload
+chmod 750 /usr/local/bin/postfix-reload
+chmod u+s /usr/local/bin/postfix-reload
 
 echo -e "\n${GREEN}Creating systemd service with Gunicorn...${NC}"
 SECRET_KEY=$(openssl rand -hex 32)
