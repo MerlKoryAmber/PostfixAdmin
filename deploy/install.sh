@@ -22,7 +22,7 @@ echo -e "${BLUE}=========================================${NC}"
 
 echo -e "\n${GREEN}Installing dependencies...${NC}"
 dnf install -y epel-release
-dnf install -y python3 python3-pip postfix nginx openssl
+dnf install -y python3 python3-pip python3-setuptools python3-wheel postfix nginx openssl
 
 echo -e "\n${GREEN}Creating application user...${NC}"
 useradd -r -s /sbin/nologin -d $INSTALL_DIR $APP_USER 2>/dev/null || true
@@ -36,10 +36,9 @@ cp deploy/nginx-https.conf $INSTALL_DIR/deploy/
 cp deploy/postfix-admin.service $INSTALL_DIR/deploy/
 
 echo -e "\n${GREEN}Creating Python virtual environment...${NC}"
-python3 -m venv --without-pip $INSTALL_DIR/venv
+python3 -m venv --without-pip --system-site-packages $INSTALL_DIR/venv
 source $INSTALL_DIR/venv/bin/activate
-curl -sS https://bootstrap.pypa.io/pip/3.9/get-pip.py | python
-pip install -r $INSTALL_DIR/requirements.txt
+python -m pip install -r $INSTALL_DIR/requirements.txt
 deactivate
 
 echo -e "\n${GREEN}Generating self-signed SSL certificate...${NC}"
@@ -72,11 +71,9 @@ chown $APP_USER:$APP_GROUP $INSTALL_DIR/ip_whitelist.json
 chmod 640 $INSTALL_DIR/ip_whitelist.json
 
 echo -e "\n${GREEN}Configuring log file access...${NC}"
-# добавляем пользователя в группу adm, если она существует
 if getent group adm > /dev/null; then
     usermod -a -G adm $APP_USER
 fi
-# на всякий случай даём права на чтение maillog
 if [ -f /var/log/maillog ]; then
     chmod 644 /var/log/maillog
 fi
