@@ -133,38 +133,38 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# --- Configuration Parameters ---
+# --- Configuration Parameters (none are strictly required) ---
 IMPORTANT_PARAMS = {
     'myhostname': {
         'name': 'Hostname',
         'description': 'Fully qualified domain name of the mail server',
         'type': 'text',
-        'required': True
+        'required': False
     },
     'mydomain': {
         'name': 'Domain',
         'description': 'Primary domain of the mail server',
         'type': 'text',
-        'required': True
+        'required': False
     },
     'mydestination': {
         'name': 'Destinations',
         'description': 'Domains for local delivery',
         'type': 'text',
-        'required': True
+        'required': False
     },
     'mynetworks': {
         'name': 'Trusted Networks',
         'description': 'Networks allowed to relay mail',
         'type': 'text',
-        'required': True
+        'required': False
     },
     'inet_interfaces': {
         'name': 'Interfaces',
         'description': 'Network interfaces to listen on',
         'type': 'select',
-        'options': ['all', 'localhost', '127.0.0.1'],
-        'required': True
+        'options': ['', 'all', 'localhost', '127.0.0.1'],
+        'required': False
     },
     'message_size_limit': {
         'name': 'Max Message Size (bytes)',
@@ -176,7 +176,7 @@ IMPORTANT_PARAMS = {
         'name': 'Outbound TLS',
         'description': 'TLS security level for outgoing connections',
         'type': 'select',
-        'options': ['none', 'may', 'encrypt'],
+        'options': ['', 'none', 'may', 'encrypt'],
         'required': False
     },
     'relayhost': {
@@ -465,13 +465,12 @@ def save_config():
     new_params = {}
     for key in IMPORTANT_PARAMS:
         value = sanitize_input(request.form.get(key, ''))
-        if IMPORTANT_PARAMS[key].get('required') and not value:
-            flash(f"Parameter '{IMPORTANT_PARAMS[key]['name']}' is required", 'danger')
-            return redirect(url_for('main_config'))
         new_params[key] = value
+
     if not os.path.exists(MAIN_CF_FILE):
         flash('main.cf file not found', 'danger')
         return redirect(url_for('main_config'))
+
     with open(MAIN_CF_FILE, 'r') as f:
         lines = f.readlines()
     updated_lines = []
@@ -500,11 +499,31 @@ def save_config():
 @admin_required
 def reload_postfix():
     try:
+        # Проверка конфигурации (права на чтение уже есть)
         subprocess.run(['/usr/sbin/postfix', 'check'], check=True, capture_output=True, timeout=10)
-        subprocess.run(['/usr/sbin/postfix', 'reload'], check=True, capture_output=True, timeout=30)
+        # Перезагрузка через systemctl с повышенными правами (polkit)
+        subprocess.run(['pkexec', 'systemctl', 'reload', 'postfix'], check=True, capture_output=True, timeout=30)
         flash('Postfix reloaded successfully', 'success')
     except subprocess.CalledProcessError as e:
         flash(f'Error reloading Postfix: {e.stderr}', 'danger')
+    except subprocess.TimeoutExpired:
+        flash('Postfix reload timed out', 'danger')
+    return redirect(url_for('main_config'))
+
+@app.route('/config/check')
+@login_required
+@admin_required
+def check_config():
+    try:
+        result = subprocess.run(['/usr/sbin/postfix', 'check'], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            flash('✅ Postfix configuration is valid', 'success')
+        else:
+            flash(f'❌ Configuration errors:\n{result.stderr}', 'danger')
+    except subprocess.TimeoutExpired:
+        flash('Configuration check timed out', 'danger')
+    except Exception as e:
+        flash(f'Error: {str(e)}', 'danger')
     return redirect(url_for('main_config'))
 
 # --- Transport ---

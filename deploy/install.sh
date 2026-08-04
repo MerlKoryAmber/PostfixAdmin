@@ -22,15 +22,10 @@ echo -e "${BLUE}=========================================${NC}"
 
 echo -e "\n${GREEN}Installing system dependencies...${NC}"
 dnf install -y epel-release
-dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl
+dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl polkit
 
 echo -e "\n${GREEN}Installing Flask-Login...${NC}"
 pip3 install flask-login
-# Проверяем, что модуль импортируется глобально
-if ! python3 -c "import flask_login" 2>/dev/null; then
-    echo -e "${YELLOW}flask-login not importable, installing into system site-packages...${NC}"
-    pip3 install --target=/usr/lib/python3.9/site-packages flask-login
-fi
 
 echo -e "\n${GREEN}Creating application user...${NC}"
 useradd -r -s /sbin/nologin -d $INSTALL_DIR $APP_USER 2>/dev/null || true
@@ -64,7 +59,20 @@ else
     exit 1
 fi
 
-# Создаём systemd unit с Gunicorn и PYTHONPATH
+# --- Polkit rule instead of sudoers ---
+echo -e "\n${GREEN}Setting up polkit for Postfix reload...${NC}"
+cat > /etc/polkit-1/rules.d/50-postfix-admin.rules << 'EOF'
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.user == "postfixadmin" &&
+        action.lookup("unit") == "postfix.service" &&
+        action.lookup("verb") == "reload") {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});
+EOF
+
 echo -e "\n${GREEN}Creating systemd service with Gunicorn...${NC}"
 SECRET_KEY=$(openssl rand -hex 32)
 cat > /etc/systemd/system/postfix-admin.service << EOF
@@ -95,6 +103,13 @@ echo -e "\n${GREEN}Setting permissions...${NC}"
 chown -R $APP_USER:$APP_GROUP $INSTALL_DIR
 usermod -a -G postfix $APP_USER
 
+# Fix access to /etc/postfix
+chown root:postfix /etc/postfix
+chmod 775 /etc/postfix
+chmod 664 /etc/postfix/main.cf 2>/dev/null || true
+chmod 664 /etc/postfix/transport 2>/dev/null || true
+chmod 664 /etc/postfix/sender_transport 2>/dev/null || true
+
 echo "{}" > $INSTALL_DIR/users.json
 chown $APP_USER:$APP_GROUP $INSTALL_DIR/users.json
 chmod 640 $INSTALL_DIR/users.json
@@ -115,7 +130,7 @@ echo -e "\n${GREEN}Firewall...${NC}"
 firewall-cmd --permanent --add-service=http --add-service=https 2>/dev/null || true
 firewall-cmd --reload 2>/dev/null || true
 
-# Запуск сервисов
+# Start services
 echo -e "\n${GREEN}Starting postfix-admin with Gunicorn...${NC}"
 systemctl start postfix-admin
 sleep 2
@@ -145,7 +160,7 @@ else
     echo -e "${RED}Port missing! Something went wrong.${NC}"
 fi
 
-# Проверка, что Gunicorn отвечает
+# Verify Gunicorn is responding
 sleep 2
 if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/ | grep -q '302\|301'; then
     echo -e "${GREEN}Gunicorn is responding.${NC}"
@@ -153,7 +168,7 @@ else
     echo -e "${RED}Gunicorn not reachable on port 8000!${NC}"
 fi
 
-# --- Создание администратора ---
+# --- Admin user creation ---
 echo -e "\n${BLUE}=========================================${NC}"
 echo -e "${BLUE}Creating admin user${NC}"
 echo -e "${BLUE}=========================================${NC}"
@@ -166,8 +181,7 @@ if [[ "$CREATE_ADMIN" =~ ^[Yy]$ ]]; then
     chown $APP_USER:$APP_GROUP $INSTALL_DIR/users.json
     echo -e "${GREEN}Admin user created successfully!${NC}"
 else
-    echo -e "${YELLOW}Skipping admin creation. You can create one later by running:${NC}"
-    echo -e "cd $INSTALL_DIR && flask create-user && chown $APP_USER:$APP_GROUP users.json"
+    echo -e "${YELLOW}Skipping admin creation.${NC}"
 fi
 
 echo -e "\n${GREEN}=========================================${NC}"
