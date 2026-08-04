@@ -20,26 +20,23 @@ echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}Postfix Admin Installation${NC}"
 echo -e "${BLUE}=========================================${NC}"
 
-echo -e "\n${GREEN}Installing dependencies...${NC}"
+echo -e "\n${GREEN}Installing system dependencies...${NC}"
 dnf install -y epel-release
-dnf install -y python3 python3-pip python3-setuptools python3-wheel postfix nginx openssl
+dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl
+
+echo -e "\n${GREEN}Installing Flask-Login (pure Python)...${NC}"
+pip3 install --no-binary :all: flask-login
 
 echo -e "\n${GREEN}Creating application user...${NC}"
 useradd -r -s /sbin/nologin -d $INSTALL_DIR $APP_USER 2>/dev/null || true
 
-echo -e "\n${GREEN}Setting up directory...${NC}"
+echo -e "\n${GREEN}Setting up directory structure...${NC}"
 mkdir -p $INSTALL_DIR/{templates,static,deploy}
-cp app.py requirements.txt $INSTALL_DIR/
+cp app.py $INSTALL_DIR/
 cp -r templates/* $INSTALL_DIR/templates/
 cp -r static/* $INSTALL_DIR/static/
 cp deploy/nginx-https.conf $INSTALL_DIR/deploy/
 cp deploy/postfix-admin.service $INSTALL_DIR/deploy/
-
-echo -e "\n${GREEN}Creating Python virtual environment...${NC}"
-python3 -m venv --without-pip --system-site-packages $INSTALL_DIR/venv
-source $INSTALL_DIR/venv/bin/activate
-python -m pip install -r $INSTALL_DIR/requirements.txt
-deactivate
 
 echo -e "\n${GREEN}Generating self-signed SSL certificate...${NC}"
 mkdir -p /etc/nginx/ssl
@@ -48,11 +45,46 @@ openssl req -x509 -nodes -days 3650 -newkey rsa:4096 \
     -out /etc/nginx/ssl/postfix-admin.crt \
     -subj "/C=RU/ST=Moscow/L=Moscow/O=InterROS/CN=$(hostname -I | awk '{print $1}')"
 
+# Устанавливаем права на ключ и сертификат
+chmod 600 /etc/nginx/ssl/postfix-admin.key
+chmod 644 /etc/nginx/ssl/postfix-admin.crt
+
 echo -e "\n${GREEN}Configuring Nginx...${NC}"
+# Удаляем дефолтный конфиг, если он есть (чтобы не было конфликтов)
+rm -f /etc/nginx/conf.d/default.conf
+# Копируем наш конфиг
 cp $INSTALL_DIR/deploy/nginx-https.conf /etc/nginx/conf.d/postfix-admin.conf
 
-echo -e "\n${GREEN}Configuring systemd...${NC}"
-cp $INSTALL_DIR/deploy/postfix-admin.service /etc/systemd/system/
+# Проверяем конфигурацию Nginx
+echo -e "\n${YELLOW}Testing Nginx configuration...${NC}"
+if nginx -t 2>&1; then
+    echo -e "${GREEN}Nginx configuration is OK.${NC}"
+else
+    echo -e "${RED}Nginx configuration test failed! Aborting.${NC}"
+    exit 1
+fi
+
+echo -e "\n${GREEN}Configuring systemd service...${NC}"
+cat > /etc/systemd/system/postfix-admin.service << EOF
+[Unit]
+Description=Postfix Admin Web Interface
+After=network.target postfix.service
+
+[Service]
+Type=simple
+User=$APP_USER
+Group=$APP_GROUP
+WorkingDirectory=$INSTALL_DIR
+Environment="SECRET_KEY=$(openssl rand -hex 32)"
+Environment="USERS_FILE=$INSTALL_DIR/users.json"
+ExecStart=/usr/bin/python3 $INSTALL_DIR/app.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
 systemctl enable postfix-admin
 
@@ -60,12 +92,11 @@ echo -e "\n${GREEN}Setting permissions...${NC}"
 chown -R $APP_USER:$APP_GROUP $INSTALL_DIR
 usermod -a -G postfix $APP_USER
 
-# --- файл пользователей ---
+# Инициализация пустых JSON-файлов
 echo "{}" > $INSTALL_DIR/users.json
 chown $APP_USER:$APP_GROUP $INSTALL_DIR/users.json
 chmod 640 $INSTALL_DIR/users.json
 
-# --- белый список IP ---
 echo "[]" > $INSTALL_DIR/ip_whitelist.json
 chown $APP_USER:$APP_GROUP $INSTALL_DIR/ip_whitelist.json
 chmod 640 $INSTALL_DIR/ip_whitelist.json
@@ -82,9 +113,37 @@ echo -e "\n${GREEN}Firewall...${NC}"
 firewall-cmd --permanent --add-service=http --add-service=https 2>/dev/null || true
 firewall-cmd --reload 2>/dev/null || true
 
-echo -e "\n${GREEN}Starting services...${NC}"
+# --- Запуск сервисов с проверкой ---
+echo -e "\n${GREEN}Starting postfix-admin...${NC}"
 systemctl start postfix-admin
+sleep 2
+if systemctl is-active --quiet postfix-admin; then
+    echo -e "${GREEN}postfix-admin is running.${NC}"
+else
+    echo -e "${RED}postfix-admin failed to start!${NC}"
+    journalctl -u postfix-admin --no-pager -n 10
+    exit 1
+fi
+
+echo -e "\n${GREEN}Starting Nginx...${NC}"
 systemctl start nginx
+sleep 2
+if systemctl is-active --quiet nginx; then
+    echo -e "${GREEN}Nginx is running.${NC}"
+else
+    echo -e "${RED}Nginx failed to start!${NC}"
+    journalctl -u nginx --no-pager -n 10
+    exit 1
+fi
+
+# Проверяем порт 443
+echo -e "\n${GREEN}Checking listening ports...${NC}"
+if ss -tlnp | grep ':443 '; then
+    echo -e "${GREEN}Port 443 is listening.${NC}"
+else
+    echo -e "${RED}Port 443 is NOT listening! Something went wrong.${NC}"
+    echo -e "Check Nginx configuration and SELinux."
+fi
 
 # --- Создание администратора ---
 echo -e "\n${BLUE}=========================================${NC}"
@@ -93,16 +152,14 @@ echo -e "${BLUE}=========================================${NC}"
 read -p "Create admin user now? (y/N): " CREATE_ADMIN
 if [[ "$CREATE_ADMIN" =~ ^[Yy]$ ]]; then
     cd $INSTALL_DIR
-    sudo -u $APP_USER bash -c '
-        source /opt/postfix-admin/venv/bin/activate
-        export FLASK_APP=app.py
-        export USERS_FILE=/opt/postfix-admin/users.json
-        flask create-user
-    '
+    export FLASK_APP=app.py
+    export USERS_FILE=$INSTALL_DIR/users.json
+    flask create-user
+    chown $APP_USER:$APP_GROUP $INSTALL_DIR/users.json
     echo -e "${GREEN}Admin user created successfully!${NC}"
 else
     echo -e "${YELLOW}Skipping admin creation. You can create one later by running:${NC}"
-    echo -e "cd $INSTALL_DIR && sudo -u $APP_USER bash -c 'source venv/bin/activate && export FLASK_APP=app.py && flask create-user'"
+    echo -e "cd $INSTALL_DIR && flask create-user && chown $APP_USER:$APP_GROUP users.json"
 fi
 
 echo -e "\n${GREEN}=========================================${NC}"
