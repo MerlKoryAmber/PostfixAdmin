@@ -38,7 +38,6 @@ def before_request():
 
 # --- File Paths ---
 TRANSPORT_FILE = '/etc/postfix/transport'
-SENDER_TRANSPORT_FILE = '/etc/postfix/sender_transport'
 MAIN_CF_FILE = '/etc/postfix/main.cf'
 USERS_FILE = os.environ.get('USERS_FILE', '/opt/postfix-admin/users.json')
 LOG_FILE = '/var/log/maillog'
@@ -93,6 +92,12 @@ IMPORTANT_PARAMS = {
     'relayhost': {
         'name': 'Relay Host',
         'description': 'SMTP server for relaying outgoing mail',
+        'type': 'text',
+        'required': False
+    },
+    'sender_dependent_default_transport_maps': {
+        'name': 'Sender Transport Maps',
+        'description': 'Path to sender transport map (e.g., hash:/etc/postfix/sender_transport)',
         'type': 'text',
         'required': False
     }
@@ -193,6 +198,14 @@ def parse_main_cf():
                     params[key] = value
     return params
 
+def get_sender_transport_file():
+    """Return sender_transport path from main.cf or default"""
+    params = parse_main_cf()
+    maps = params.get('sender_dependent_default_transport_maps', '')
+    if maps.startswith('hash:'):
+        return maps[5:]
+    return '/etc/postfix/sender_transport'
+
 def parse_transport():
     entries = []
     if not os.path.exists(TRANSPORT_FILE):
@@ -212,11 +225,12 @@ def parse_transport():
     return entries
 
 def parse_sender_transport():
+    sender_file = get_sender_transport_file()
     entries = []
-    if not os.path.exists(SENDER_TRANSPORT_FILE):
+    if not os.path.exists(sender_file):
         return entries
 
-    with open(SENDER_TRANSPORT_FILE, 'r') as f:
+    with open(sender_file, 'r') as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith('#'):
@@ -437,6 +451,7 @@ def add_sender_routing():
         'options': options
     })
 
+    sender_file = get_sender_transport_file()
     content = "# Postfix sender-dependent transport map\n# Managed via web interface\n\n"
     for entry in entries:
         line = f"{entry['sender']}\t{entry['transport']}"
@@ -446,14 +461,40 @@ def add_sender_routing():
                     line += f" {k}={v}"
         content += line + "\n"
 
-    success, error = atomic_write_file(SENDER_TRANSPORT_FILE, content)
+    success, error = atomic_write_file(sender_file, content)
     
     if success:
-        subprocess.run(['/usr/sbin/postmap', SENDER_TRANSPORT_FILE], check=True, capture_output=True)
+        subprocess.run(['/usr/sbin/postmap', sender_file], check=True, capture_output=True)
         flash(f'Routing rule added: {sender} → {transport}', 'success')
     else:
         flash(f'Error saving: {error}', 'danger')
 
+    return redirect(url_for('sender_routing'))
+
+@app.route('/sender-routing/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_sender_routing():
+    sender = sanitize_input(request.form.get('sender', ''))
+    entries = parse_sender_transport()
+    entries = [e for e in entries if e['sender'] != sender]
+
+    sender_file = get_sender_transport_file()
+    content = "# Postfix sender-dependent transport map\n# Managed via web interface\n\n"
+    for entry in entries:
+        line = f"{entry['sender']}\t{entry['transport']}"
+        if entry.get('options'):
+            for k, v in entry['options'].items():
+                if v:
+                    line += f" {k}={v}"
+        content += line + "\n"
+
+    success, error = atomic_write_file(sender_file, content)
+    if success:
+        subprocess.run(['/usr/sbin/postmap', sender_file], check=True, capture_output=True)
+        flash(f'Routing rule deleted for {sender}', 'success')
+    else:
+        flash(f'Error: {error}', 'danger')
     return redirect(url_for('sender_routing'))
 
 @app.route('/logs')
@@ -496,6 +537,7 @@ def api_status():
 # --- CLI Commands ---
 @app.cli.command('create-user')
 def create_user():
+    """Create a new user"""
     import click
     username = click.prompt('Username')
     
@@ -504,7 +546,7 @@ def create_user():
         click.echo('User already exists')
         return
     
-    password = click.prompt('Password', hide_confirmation=True)
+    password = click.prompt('Password', hide_input=True, confirmation_prompt=True)
     role = click.prompt('Role (admin/user)', default='user', type=click.Choice(['admin', 'user']))
 
     users[username] = {
@@ -518,13 +560,20 @@ def create_user():
 
 @app.cli.command('list-users')
 def list_users():
+    """List all users"""
     users = load_users()
+    if not users:
+        print("No users found")
     for username, data in users.items():
         print(f"{username} - {data.get('role', 'user')}")
 
 @app.errorhandler(404)
 def not_found(e):
     return render_template('base.html', error='Page not found'), 404
+
+@app.errorhandler(500)
+def server_error(e):
+    return render_template('base.html', error='Internal server error'), 500
 
 if __name__ == '__main__':
     if not os.path.exists(USERS_FILE):
