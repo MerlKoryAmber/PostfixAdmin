@@ -22,7 +22,7 @@ echo -e "${BLUE}=========================================${NC}"
 
 echo -e "\n${GREEN}Installing system dependencies...${NC}"
 dnf install -y epel-release
-dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl polkit
+dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl
 
 echo -e "\n${GREEN}Installing Flask-Login...${NC}"
 pip3 install flask-login
@@ -59,19 +59,13 @@ else
     exit 1
 fi
 
-# --- Polkit rule instead of sudoers ---
-echo -e "\n${GREEN}Setting up polkit for Postfix reload...${NC}"
-cat > /etc/polkit-1/rules.d/50-postfix-admin.rules << 'EOF'
-polkit.addRule(function(action, subject) {
-    if (action.id == "org.freedesktop.systemd1.manage-units" &&
-        subject.user == "postfixadmin" &&
-        action.lookup("unit") == "postfix.service" &&
-        action.lookup("verb") == "reload") {
-        return polkit.Result.YES;
-    }
-    return polkit.Result.NOT_HANDLED;
-});
+# --- sudoers rule for postfix reload ---
+echo -e "\n${GREEN}Granting passwordless sudo for postfix reload...${NC}"
+cat > /etc/sudoers.d/postfix-admin << 'EOF'
+# Allow postfixadmin user to run postfix reload without a password
+postfixadmin ALL=(root) NOPASSWD: /usr/sbin/postfix reload
 EOF
+chmod 440 /etc/sudoers.d/postfix-admin
 
 echo -e "\n${GREEN}Creating systemd service with Gunicorn...${NC}"
 SECRET_KEY=$(openssl rand -hex 32)

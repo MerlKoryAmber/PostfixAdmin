@@ -501,11 +501,11 @@ def reload_postfix():
     try:
         # Проверка конфигурации (права на чтение уже есть)
         subprocess.run(['/usr/sbin/postfix', 'check'], check=True, capture_output=True, timeout=10)
-        # Перезагрузка через systemctl с повышенными правами (polkit)
-        subprocess.run(['pkexec', 'systemctl', 'reload', 'postfix'], check=True, capture_output=True, timeout=30)
+        # Перезагрузка с использованием sudo
+        subprocess.run(['sudo', '/usr/sbin/postfix', 'reload'], check=True, capture_output=True, timeout=30)
         flash('Postfix reloaded successfully', 'success')
     except subprocess.CalledProcessError as e:
-        flash(f'Error reloading Postfix: {e.stderr}', 'danger')
+        flash(f'Error reloading Postfix: {e.stderr.decode() if e.stderr else "unknown error"}', 'danger')
     except subprocess.TimeoutExpired:
         flash('Postfix reload timed out', 'danger')
     return redirect(url_for('main_config'))
