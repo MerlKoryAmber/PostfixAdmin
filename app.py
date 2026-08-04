@@ -499,13 +499,19 @@ def save_config():
 @admin_required
 def reload_postfix():
     try:
-        # Проверка конфигурации (права на чтение уже есть)
+        # Проверка конфигурации
         subprocess.run(['/usr/sbin/postfix', 'check'], check=True, capture_output=True, timeout=10)
-        # Перезагрузка с использованием sudo
-        subprocess.run(['sudo', '/usr/sbin/postfix', 'reload'], check=True, capture_output=True, timeout=30)
-        flash('Postfix reloaded successfully', 'success')
+        # Перезагрузка через systemctl (sudo с отключением requiretty)
+        result = subprocess.run(['sudo', '-n', 'systemctl', 'reload', 'postfix'],
+                                capture_output=True, timeout=30)
+        if result.returncode != 0:
+            err = result.stderr.decode().strip() or result.stdout.decode().strip() or f"exit code {result.returncode}"
+            flash(f'Error reloading Postfix: {err}', 'danger')
+        else:
+            flash('Postfix reloaded successfully', 'success')
     except subprocess.CalledProcessError as e:
-        flash(f'Error reloading Postfix: {e.stderr.decode() if e.stderr else "unknown error"}', 'danger')
+        err = e.stderr.decode().strip() if e.stderr else (e.stdout.decode().strip() if e.stdout else f"exit code {e.returncode}")
+        flash(f'Error reloading Postfix: {err}', 'danger')
     except subprocess.TimeoutExpired:
         flash('Postfix reload timed out', 'danger')
     return redirect(url_for('main_config'))

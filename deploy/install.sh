@@ -59,11 +59,11 @@ else
     exit 1
 fi
 
-# --- sudoers rule for postfix reload ---
+# --- sudoers rule for postfix reload via systemctl ---
 echo -e "\n${GREEN}Granting passwordless sudo for postfix reload...${NC}"
 cat > /etc/sudoers.d/postfix-admin << 'EOF'
-# Allow postfixadmin user to run postfix reload without a password
-postfixadmin ALL=(root) NOPASSWD: /usr/sbin/postfix reload
+Defaults:postfixadmin !requiretty
+postfixadmin ALL=(root) NOPASSWD: /usr/bin/systemctl reload postfix
 EOF
 chmod 440 /etc/sudoers.d/postfix-admin
 
