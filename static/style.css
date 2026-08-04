@@ -72,16 +72,6 @@ body {
     box-shadow: 0 4px 8px rgba(26,35,126,.3);
 }
 
-.btn-success {
-    background: linear-gradient(135deg, #2e7d32 0%, #43a047 100%);
-    border: none;
-}
-
-.btn-danger {
-    background: linear-gradient(135deg, #c62828 0%, #e53935 100%);
-    border: none;
-}
-
 .table {
     border-radius: 8px;
     overflow: hidden;
@@ -109,30 +99,6 @@ body {
     border-radius: 8px;
     font-family: 'Courier New', monospace;
     font-size: 13px;
-}
-
-.log-viewer pre {
-    color: #00ff00;
-    background: transparent;
-    border: none;
-    margin: 0;
-    padding: 15px;
-}
-
-.modal-content {
-    border: none;
-    border-radius: 12px;
-}
-
-.modal-header {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
-    color: white;
-    border-radius: 12px 12px 0 0;
-}
-
-.form-control:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 0.2rem rgba(26,35,126,.25);
 }
 
 footer {

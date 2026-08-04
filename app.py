@@ -95,9 +95,9 @@ IMPORTANT_PARAMS = {
         'type': 'text',
         'required': False
     },
-    'sender_dependent_default_transport_maps': {
-        'name': 'Sender Transport Maps',
-        'description': 'Path to sender transport map (e.g., hash:/etc/postfix/sender_transport)',
+    'sender_dependent_relayhost_maps': {
+        'name': 'Sender Relayhost Maps',
+        'description': 'Path to sender-dependent relayhost map (e.g., hash:/etc/postfix/sender_transport)',
         'type': 'text',
         'required': False
     }
@@ -201,7 +201,7 @@ def parse_main_cf():
 def get_sender_transport_file():
     """Return sender_transport path from main.cf or default"""
     params = parse_main_cf()
-    maps = params.get('sender_dependent_default_transport_maps', '')
+    maps = params.get('sender_dependent_relayhost_maps', '')
     if maps.startswith('hash:'):
         return maps[5:]
     return '/etc/postfix/sender_transport'
@@ -248,6 +248,45 @@ def parse_sender_transport():
                     'options': options
                 })
     return entries
+
+def parse_log_line(line):
+    """
+    Извлекает из строки лога Postfix поля:
+    - timestamp
+    - from (адрес отправителя)
+    - to (адрес получателя)
+    - status
+    - relay
+    Возвращает словарь с ключами timestamp, from, to, status, relay, raw.
+    """
+    result = {
+        'timestamp': '',
+        'from': '',
+        'to': '',
+        'status': '',
+        'relay': '',
+        'raw': line
+    }
+    if len(line) >= 15:
+        result['timestamp'] = line[:15].strip()
+    
+    to_match = re.search(r'to=<([^>]+)>', line)
+    if to_match:
+        result['to'] = to_match.group(1)
+    
+    from_match = re.search(r'from=<([^>]+)>', line)
+    if from_match:
+        result['from'] = from_match.group(1)
+    
+    status_match = re.search(r'status=(\S+)', line)
+    if status_match:
+        result['status'] = status_match.group(1)
+    
+    relay_match = re.search(r'relay=([^\s,]+)', line)
+    if relay_match:
+        result['relay'] = relay_match.group(1)
+    
+    return result
 
 def sanitize_input(value):
     if not value:
@@ -452,7 +491,7 @@ def add_sender_routing():
     })
 
     sender_file = get_sender_transport_file()
-    content = "# Postfix sender-dependent transport map\n# Managed via web interface\n\n"
+    content = "# Postfix sender-dependent relayhost map\n# Managed via web interface\n\n"
     for entry in entries:
         line = f"{entry['sender']}\t{entry['transport']}"
         if entry.get('options'):
@@ -480,7 +519,7 @@ def delete_sender_routing():
     entries = [e for e in entries if e['sender'] != sender]
 
     sender_file = get_sender_transport_file()
-    content = "# Postfix sender-dependent transport map\n# Managed via web interface\n\n"
+    content = "# Postfix sender-dependent relayhost map\n# Managed via web interface\n\n"
     for entry in entries:
         line = f"{entry['sender']}\t{entry['transport']}"
         if entry.get('options'):
@@ -506,20 +545,60 @@ def view_logs():
             all_lines = f.readlines()
             lines = all_lines[-MAX_LOG_LINES:]
 
-    filter_type = request.args.get('filter', 'all')
+    # Парсим все строки
+    parsed = [parse_log_line(line.strip()) for line in lines]
+
+    # Фильтры из запроса
+    from_filter = sanitize_input(request.args.get('from', ''))
+    to_filter = sanitize_input(request.args.get('to', ''))
+    status_filter = sanitize_input(request.args.get('status', ''))
+    relay_filter = sanitize_input(request.args.get('relay', ''))
     search = sanitize_input(request.args.get('search', ''))
+    filter_type = request.args.get('filter', 'all')
 
-    filtered_lines = []
-    for line in lines:
-        if search and search.lower() not in line.lower():
+    filtered = []
+    for entry in parsed:
+        # Фильтр по типу (весь лог / только postfix / только ошибки)
+        if filter_type == 'errors' and not any(k in entry['raw'].lower() for k in ['error', 'fail', 'reject', 'warning']):
             continue
-        if filter_type == 'errors' and not any(k in line.lower() for k in ['error', 'fail', 'reject']):
+        if filter_type == 'postfix' and 'postfix' not in entry['raw'].lower():
             continue
-        elif filter_type == 'postfix' and 'postfix' not in line.lower():
-            continue
-        filtered_lines.append(line.strip())
 
-    return render_template('logs.html', lines=filtered_lines, filter_type=filter_type, search=search)
+        # Текстовый поиск по сырой строке
+        if search and search.lower() not in entry['raw'].lower():
+            continue
+
+        # Фильтры по полям
+        if from_filter and from_filter.lower() not in entry['from'].lower():
+            continue
+        if to_filter and to_filter.lower() not in entry['to'].lower():
+            continue
+        if status_filter and status_filter.lower() not in entry['status'].lower():
+            continue
+        if relay_filter and relay_filter.lower() not in entry['relay'].lower():
+            continue
+
+        filtered.append(entry)
+
+    return render_template('logs.html',
+                           logs=filtered,
+                           filter_type=filter_type,
+                           search=search,
+                           from_filter=from_filter,
+                           to_filter=to_filter,
+                           status_filter=status_filter,
+                           relay_filter=relay_filter)
+
+@app.route('/api/logs')
+@login_required
+def api_logs():
+    lines = []
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, 'r') as f:
+            all_lines = f.readlines()
+            lines = all_lines[-100:]
+
+    return jsonify({'lines': [l.strip() for l in lines]})
 
 @app.route('/api/status')
 @login_required

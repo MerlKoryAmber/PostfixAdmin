@@ -3,32 +3,111 @@
 {% block content %}
 <h2>Mail Server Logs</h2>
 
-<div class="mb-3">
-    <form method="GET" class="row g-3">
-        <div class="col-auto">
-            <select name="filter" class="form-select">
-                <option value="all" {% if filter_type == 'all' %}selected{% endif %}>All Entries</option>
-                <option value="postfix" {% if filter_type == 'postfix' %}selected{% endif %}>Postfix Only</option>
-                <option value="errors" {% if filter_type == 'errors' %}selected{% endif %}>Errors Only</option>
-            </select>
-        </div>
-        <div class="col-auto">
-            <input type="text" name="search" class="form-control" placeholder="Search..." 
-                   value="{{ search }}">
-        </div>
-        <div class="col-auto">
-            <button type="submit" class="btn btn-primary">Apply Filter</button>
-        </div>
-    </form>
+<!-- Фильтры -->
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="GET" class="row g-3">
+            <div class="col-md-2">
+                <label for="from" class="form-label">From</label>
+                <input type="text" class="form-control" id="from" name="from" 
+                       placeholder="sender@domain" value="{{ from_filter }}">
+            </div>
+            <div class="col-md-2">
+                <label for="to" class="form-label">To</label>
+                <input type="text" class="form-control" id="to" name="to" 
+                       placeholder="recipient@domain" value="{{ to_filter }}">
+            </div>
+            <div class="col-md-2">
+                <label for="status" class="form-label">Status</label>
+                <input type="text" class="form-control" id="status" name="status" 
+                       placeholder="sent, deferred..." value="{{ status_filter }}">
+            </div>
+            <div class="col-md-2">
+                <label for="relay" class="form-label">Relay</label>
+                <input type="text" class="form-control" id="relay" name="relay" 
+                       placeholder="hostname" value="{{ relay_filter }}">
+            </div>
+            <div class="col-md-2">
+                <label for="search" class="form-label">Text search</label>
+                <input type="text" class="form-control" id="search" name="search" 
+                       placeholder="any text" value="{{ search }}">
+            </div>
+            <div class="col-md-2">
+                <label for="filter" class="form-label">Log type</label>
+                <select class="form-select" id="filter" name="filter">
+                    <option value="all" {% if filter_type == 'all' %}selected{% endif %}>All entries</option>
+                    <option value="postfix" {% if filter_type == 'postfix' %}selected{% endif %}>Postfix only</option>
+                    <option value="errors" {% if filter_type == 'errors' %}selected{% endif %}>Errors only</option>
+                </select>
+            </div>
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary">Apply Filters</button>
+                <a href="{{ url_for('view_logs') }}" class="btn btn-secondary">Clear</a>
+            </div>
+        </form>
+    </div>
 </div>
 
+<!-- Таблица логов -->
 <div class="card">
-    <div class="card-header">
-        <span>Log File: /var/log/maillog</span>
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Log file: /var/log/maillog</span>
+        <small class="text-muted">Showing {{ logs|length }} entries</small>
     </div>
-    <div class="card-body log-viewer">
-        <pre><code>{% for line in lines %}{{ line }}
-{% endfor %}</code></pre>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-striped mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th style="width: 120px;">Time</th>
+                        <th style="width: 180px;">From</th>
+                        <th style="width: 180px;">To</th>
+                        <th style="width: 90px;">Status</th>
+                        <th style="width: 200px;">Relay</th>
+                        <th>Raw Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td><small>{{ log.timestamp }}</small></td>
+                        <td><small>{{ log.from }}</small></td>
+                        <td><small>{{ log.to }}</small></td>
+                        <td>
+                            {% if 'sent' in log.status %}
+                                <span class="badge bg-success">{{ log.status }}</span>
+                            {% elif 'deferred' in log.status %}
+                                <span class="badge bg-warning text-dark">{{ log.status }}</span>
+                            {% elif 'bounced' in log.status or 'error' in log.status %}
+                                <span class="badge bg-danger">{{ log.status }}</span>
+                            {% else %}
+                                <small>{{ log.status }}</small>
+                            {% endif %}
+                        </td>
+                        <td><small>{{ log.relay }}</small></td>
+                        <td class="small text-muted">{{ log.raw }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted">No log entries found</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Автообновление каждые 30 секунд (опционально)
+setInterval(function() {
+    fetch('/api/logs')
+        .then(response => response.json())
+        .then(data => {
+            console.log('Logs updated:', data.lines.length);
+        });
+}, 30000);
+</script>
 {% endblock %}
