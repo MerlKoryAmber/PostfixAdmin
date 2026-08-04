@@ -23,36 +23,44 @@
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'main_config' %}active{% endif %}" 
-                           href="{{ url_for('main_config') }}">
-                            ⚙️ Configuration
-                        </a>
+                           href="{{ url_for('main_config') }}">⚙️ Configuration</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'transport' %}active{% endif %}" 
-                           href="{{ url_for('transport') }}">
-                            📋 Transport
-                        </a>
+                           href="{{ url_for('transport') }}">📋 Transport</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'sender_routing' %}active{% endif %}" 
-                           href="{{ url_for('sender_routing') }}">
-                            🚀 Routing
-                        </a>
+                           href="{{ url_for('sender_routing') }}">🚀 Routing</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'view_logs' %}active{% endif %}" 
-                           href="{{ url_for('view_logs') }}">
-                            📊 Logs
+                           href="{{ url_for('view_logs') }}">📊 Logs</a>
+                    </li>
+                    {% if current_user.role == 'admin' %}
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="adminMenu" role="button" data-bs-toggle="dropdown">
+                            🔧 Admin
                         </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{{ url_for('list_users') }}">👥 Users</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('ip_whitelist') }}">🛡️ IP Whitelist</a></li>
+                        </ul>
+                    </li>
+                    {% endif %}
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="userMenu" role="button" data-bs-toggle="dropdown">
+                            👤 {{ current_user.id }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('profile') }}">🔑 Change Password</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">🚪 Logout</a></li>
+                        </ul>
                     </li>
                 </ul>
-                <span class="navbar-text me-3">
-                    👤 {{ current_user.id }} 
-                    <span class="badge bg-{{ 'danger' if current_user.role == 'admin' else 'info' }}">
-                        {{ current_user.role }}
-                    </span>
-                </span>
-                <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
             </div>
             {% endif %}
         </div>
