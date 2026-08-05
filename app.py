@@ -502,7 +502,7 @@ def save_config():
 @admin_required
 def reload_postfix():
     try:
-        # Проверка конфигурации (права на чтение есть)
+        # Проверка конфигурации
         subprocess.run(['/usr/sbin/postfix', 'check'], check=True, capture_output=True, timeout=10)
         # Перезагрузка через C-обёртку с SUID
         result = subprocess.run([POSTFIX_RELOAD_CMD], capture_output=True, timeout=30)
