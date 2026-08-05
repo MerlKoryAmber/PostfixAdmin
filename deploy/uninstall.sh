@@ -33,9 +33,6 @@ echo -e "\n${GREEN}Removing systemd unit...${NC}"
 rm -f /etc/systemd/system/postfix-admin.service
 systemctl daemon-reload
 
-echo -e "\n${GREEN}Removing SUID wrapper...${NC}"
-rm -f /usr/local/bin/postfix-reload
-
 echo -e "\n${GREEN}Removing application directory...${NC}"
 rm -rf "$INSTALL_DIR"
 
@@ -59,3 +56,4 @@ echo -e "${GREEN}Uninstall complete.${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo ""
 echo -e "${YELLOW}Note: Postfix and Nginx packages were not removed.${NC}"
+echo "To reload Nginx configuration changes, run: systemctl reload nginx"

@@ -138,6 +138,14 @@ else
     echo -e "${RED}Port missing! Something went wrong.${NC}"
 fi
 
+# Проверка Gunicorn
+sleep 2
+if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/ | grep -q '302\|301'; then
+    echo -e "${GREEN}Gunicorn is responding.${NC}"
+else
+    echo -e "${RED}Gunicorn not reachable on port 8000!${NC}"
+fi
+
 # --- Создание администратора ---
 echo -e "\n${BLUE}=========================================${NC}"
 echo -e "${BLUE}Creating admin user${NC}"

@@ -36,6 +36,7 @@ USERS_FILE = os.environ.get('USERS_FILE', '/opt/postfix-admin/users.json')
 IP_WHITELIST_FILE = '/opt/postfix-admin/ip_whitelist.json'
 LOG_FILE = '/var/log/maillog'
 MAX_LOG_LINES = 500
+MAX_QUEUE_LINES = 1000
 
 # --- IP Whitelist Management ---
 def load_ip_whitelist():
@@ -280,6 +281,29 @@ def parse_log_line(line):
     if status_match: result['status'] = status_match.group(1)
     relay_match = re.search(r'relay=([^\s,]+)', line)
     if relay_match: result['relay'] = relay_match.group(1)
+    return result
+
+def parse_queue_line(line):
+    """Парсит строку вывода postqueue -p"""
+    result = {
+        'queue_id': '',
+        'size': '',
+        'arrival_time': '',
+        'sender': '',
+        'recipient': '',
+        'status': '',
+        'raw': line
+    }
+    # Формат: QUEUE_ID  SIZE  ARRIVAL_TIME  SENDER  STATUS  RECIPIENT
+    parts = line.split()
+    if len(parts) >= 5:
+        result['queue_id'] = parts[0] if len(parts) > 0 else ''
+        result['size'] = parts[1] if len(parts) > 1 else ''
+        result['arrival_time'] = ' '.join(parts[2:5]) if len(parts) > 4 else ''
+        result['sender'] = parts[5] if len(parts) > 5 else ''
+        result['recipient'] = parts[6] if len(parts) > 6 else ''
+        if len(parts) > 7:
+            result['status'] = ' '.join(parts[7:])
     return result
 
 def sanitize_input(value):
@@ -635,6 +659,103 @@ def delete_sender_routing():
     else:
         flash(f'Error: {error}', 'danger')
     return redirect(url_for('sender_routing'))
+
+# --- Mail Queue ---
+@app.route('/queue')
+@login_required
+@admin_required
+def view_queue():
+    """Просмотр почтовой очереди"""
+    entries = []
+    try:
+        result = subprocess.run(
+            ['/usr/sbin/postqueue', '-p'],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')
+            # Первая строка - заголовок, последние строки - итоги
+            in_queue = False
+            for line in lines:
+                if line.startswith('-Queue ID-'):
+                    in_queue = True
+                    continue
+                if line.startswith('-- '):
+                    in_queue = False
+                    continue
+                if in_queue and line.strip():
+                    entry = parse_queue_line(line)
+                    if entry['queue_id']:
+                        entries.append(entry)
+    except Exception as e:
+        flash(f'Error reading queue: {str(e)}', 'danger')
+    
+    return render_template('queue.html', entries=entries)
+
+@app.route('/queue/flush')
+@login_required
+@admin_required
+def flush_queue():
+    """Принудительная отправка всей очереди"""
+    try:
+        subprocess.run(['/usr/sbin/postqueue', '-f'], check=True, capture_output=True, timeout=30)
+        flash('Queue flush initiated successfully', 'success')
+    except subprocess.CalledProcessError as e:
+        flash(f'Error flushing queue: {e.stderr.decode().strip()}', 'danger')
+    except Exception as e:
+        flash(f'Error: {str(e)}', 'danger')
+    return redirect(url_for('view_queue'))
+
+@app.route('/queue/delete/<queue_id>')
+@login_required
+@admin_required
+def delete_queue_message(queue_id):
+    """Удаление конкретного сообщения из очереди"""
+    try:
+        subprocess.run(
+            ['/usr/sbin/postsuper', '-d', queue_id],
+            check=True, capture_output=True, timeout=10
+        )
+        flash(f'Message {queue_id} deleted from queue', 'success')
+    except subprocess.CalledProcessError as e:
+        flash(f'Error deleting message: {e.stderr.decode().strip()}', 'danger')
+    except Exception as e:
+        flash(f'Error: {str(e)}', 'danger')
+    return redirect(url_for('view_queue'))
+
+@app.route('/queue/delete-all')
+@login_required
+@admin_required
+def delete_all_queue():
+    """Удаление всех сообщений из очереди (кроме активных)"""
+    try:
+        subprocess.run(
+            ['/usr/sbin/postsuper', '-d', 'ALL'],
+            check=True, capture_output=True, timeout=30
+        )
+        flash('All queued messages deleted (active deliveries preserved)', 'success')
+    except subprocess.CalledProcessError as e:
+        flash(f'Error deleting queue: {e.stderr.decode().strip()}', 'danger')
+    except Exception as e:
+        flash(f'Error: {str(e)}', 'danger')
+    return redirect(url_for('view_queue'))
+
+@app.route('/queue/delete-deferred')
+@login_required
+@admin_required
+def delete_deferred():
+    """Удаление всех отложенных сообщений"""
+    try:
+        subprocess.run(
+            ['/usr/sbin/postsuper', '-d', 'ALL', 'deferred'],
+            check=True, capture_output=True, timeout=30
+        )
+        flash('All deferred messages deleted', 'success')
+    except subprocess.CalledProcessError as e:
+        flash(f'Error deleting deferred messages: {e.stderr.decode().strip()}', 'danger')
+    except Exception as e:
+        flash(f'Error: {str(e)}', 'danger')
+    return redirect(url_for('view_queue'))
 
 # --- Logs ---
 @app.route('/logs')
