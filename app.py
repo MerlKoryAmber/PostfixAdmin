@@ -37,6 +37,9 @@ IP_WHITELIST_FILE = '/opt/postfix-admin/ip_whitelist.json'
 LOG_FILE = '/var/log/maillog'
 MAX_LOG_LINES = 500
 
+# Путь к C-обёртке с SUID для перезагрузки Postfix
+POSTFIX_RELOAD_CMD = '/usr/local/bin/postfix-reload'
+
 # --- IP Whitelist Management ---
 def load_ip_whitelist():
     if os.path.exists(IP_WHITELIST_FILE):
@@ -499,11 +502,10 @@ def save_config():
 @admin_required
 def reload_postfix():
     try:
-        # Проверка конфигурации
+        # Проверка конфигурации (права на чтение есть)
         subprocess.run(['/usr/sbin/postfix', 'check'], check=True, capture_output=True, timeout=10)
-        # Перезагрузка через sudo
-        result = subprocess.run(['sudo', '/usr/sbin/postfix', 'reload'],
-                                capture_output=True, timeout=30)
+        # Перезагрузка через C-обёртку с SUID
+        result = subprocess.run([POSTFIX_RELOAD_CMD], capture_output=True, timeout=30)
         if result.returncode != 0:
             err = result.stderr.decode().strip() or result.stdout.decode().strip() or f"exit code {result.returncode}"
             flash(f'Error reloading Postfix: {err}', 'danger')
@@ -594,30 +596,43 @@ def sender_routing():
 def add_sender_routing():
     sender = sanitize_input(request.form.get('sender',''))
     transport = sanitize_input(request.form.get('transport',''))
+    
     if not sender or not transport:
         flash('Sender and transport are required', 'danger')
         return redirect(url_for('sender_routing'))
+
     options = {}
     if request.form.get('use_auth') == 'yes':
         options['smtp_sasl_auth_enable'] = 'yes'
         username = sanitize_input(request.form.get('smtp_username',''))
-        if username: options['smtp_username'] = username
+        if username:
+            options['smtp_username'] = username
+
     entries = parse_sender_transport()
-    entries.append({'sender': sender, 'transport': transport, 'options': options})
+    entries.append({
+        'sender': sender,
+        'transport': transport,
+        'options': options
+    })
+
     sender_file = get_sender_transport_file()
     content = "# Postfix sender-dependent relayhost map\n# Managed via web interface\n\n"
     for entry in entries:
         line = f"{entry['sender']}\t{entry['transport']}"
         if entry.get('options'):
             for k, v in entry['options'].items():
-                if v: line += f" {k}={v}"
+                if v:
+                    line += f" {k}={v}"
         content += line + "\n"
+
     success, error = atomic_write_file(sender_file, content)
+    
     if success:
         subprocess.run(['/usr/sbin/postmap', sender_file], check=True, capture_output=True)
         flash(f'Routing rule added: {sender} → {transport}', 'success')
     else:
         flash(f'Error saving: {error}', 'danger')
+
     return redirect(url_for('sender_routing'))
 
 @app.route('/sender-routing/delete', methods=['POST'])
@@ -633,7 +648,8 @@ def delete_sender_routing():
         line = f"{entry['sender']}\t{entry['transport']}"
         if entry.get('options'):
             for k, v in entry['options'].items():
-                if v: line += f" {k}={v}"
+                if v:
+                    line += f" {k}={v}"
         content += line + "\n"
     success, error = atomic_write_file(sender_file, content)
     if success:

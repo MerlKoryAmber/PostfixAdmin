@@ -1,10 +1,4 @@
 #!/bin/bash
-#
-# Postfix Admin Uninstall Script
-# Удаляет все компоненты, установленные install.sh, не затрагивая Postfix и Nginx
-# Запуск: sudo bash uninstall.sh
-#
-
 set -e
 
 RED='\033[0;31m'
@@ -39,11 +33,8 @@ echo -e "\n${GREEN}Removing systemd unit...${NC}"
 rm -f /etc/systemd/system/postfix-admin.service
 systemctl daemon-reload
 
-echo -e "\n${GREEN}Removing sudoers file...${NC}"
-rm -f /etc/sudoers.d/postfix-admin
-
-echo -e "\n${GREEN}Removing polkit rules (if any)...${NC}"
-rm -f /etc/polkit-1/rules.d/50-postfix-admin.rules
+echo -e "\n${GREEN}Removing SUID wrapper...${NC}"
+rm -f /usr/local/bin/postfix-reload
 
 echo -e "\n${GREEN}Removing application directory...${NC}"
 rm -rf "$INSTALL_DIR"
@@ -58,7 +49,7 @@ rm -f /etc/nginx/ssl/postfix-admin.key
 echo -e "\n${GREEN}Removing application user...${NC}"
 userdel "$APP_USER" 2>/dev/null || true
 
-echo -e "\n${GREEN}Removing firewall rules (optional)...${NC}"
+echo -e "\n${GREEN}Removing firewall rules...${NC}"
 firewall-cmd --permanent --remove-service=http 2>/dev/null || true
 firewall-cmd --permanent --remove-service=https 2>/dev/null || true
 firewall-cmd --reload 2>/dev/null || true

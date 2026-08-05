@@ -22,7 +22,7 @@ echo -e "${BLUE}=========================================${NC}"
 
 echo -e "\n${GREEN}Installing system dependencies...${NC}"
 dnf install -y epel-release
-dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl
+dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl gcc
 
 echo -e "\n${GREEN}Installing Flask-Login...${NC}"
 pip3 install flask-login
@@ -59,19 +59,25 @@ else
     exit 1
 fi
 
-# --- sudoers rule for postfix reload ---
-echo -e "\n${GREEN}Granting passwordless sudo for postfix reload...${NC}"
-cat > /etc/sudoers.d/postfix-admin << 'EOF'
-Defaults:postfixadmin !requiretty
-postfixadmin ALL=(root) NOPASSWD: /usr/sbin/postfix reload
-EOF
-chmod 440 /etc/sudoers.d/postfix-admin
+# --- Создание C-обёртки для postfix reload ---
+echo -e "\n${GREEN}Creating SUID C-wrapper for postfix reload...${NC}"
+cat > /tmp/postfix-reload.c << 'EOF'
+#include <unistd.h>
+#include <stdlib.h>
 
-# --- Раскомментируем includedir, если нужно ---
-if grep -q '^#includedir /etc/sudoers.d' /etc/sudoers; then
-    echo -e "\n${YELLOW}Uncommenting #includedir /etc/sudoers.d in /etc/sudoers...${NC}"
-    sed -i 's/^#includedir/includedir/' /etc/sudoers
-fi
+int main() {
+    setuid(0);
+    setgid(0);
+    system("/usr/sbin/postfix reload");
+    return 0;
+}
+EOF
+
+gcc -o /usr/local/bin/postfix-reload /tmp/postfix-reload.c
+rm -f /tmp/postfix-reload.c
+
+chown root:$APP_GROUP /usr/local/bin/postfix-reload
+chmod 4750 /usr/local/bin/postfix-reload
 
 echo -e "\n${GREEN}Creating systemd service with Gunicorn...${NC}"
 SECRET_KEY=$(openssl rand -hex 32)
@@ -103,13 +109,14 @@ echo -e "\n${GREEN}Setting permissions...${NC}"
 chown -R $APP_USER:$APP_GROUP $INSTALL_DIR
 usermod -a -G postfix $APP_USER
 
-# Fix access to /etc/postfix
+# Права на /etc/postfix
 chown root:postfix /etc/postfix
 chmod 775 /etc/postfix
 chmod 664 /etc/postfix/main.cf 2>/dev/null || true
 chmod 664 /etc/postfix/transport 2>/dev/null || true
 chmod 664 /etc/postfix/sender_transport 2>/dev/null || true
 
+# Инициализация JSON-файлов
 echo "{}" > $INSTALL_DIR/users.json
 chown $APP_USER:$APP_GROUP $INSTALL_DIR/users.json
 chmod 640 $INSTALL_DIR/users.json
@@ -130,7 +137,7 @@ echo -e "\n${GREEN}Firewall...${NC}"
 firewall-cmd --permanent --add-service=http --add-service=https 2>/dev/null || true
 firewall-cmd --reload 2>/dev/null || true
 
-# Start services
+# Запуск сервисов
 echo -e "\n${GREEN}Starting postfix-admin with Gunicorn...${NC}"
 systemctl start postfix-admin
 sleep 2
@@ -151,14 +158,16 @@ else
     echo -e "${RED}Nginx failed to start!${NC}"
     journalctl -u nginx --no-pager -n 10
     exit 1
-fiecho -e "\n${GREEN}Checking listening ports...${NC}"
+fi
+
+echo -e "\n${GREEN}Checking listening ports...${NC}"
 if ss -tlnp | grep ':443 ' && ss -tlnp | grep ':8000 '; then
     echo -e "${GREEN}Both ports 443 and 8000 are listening.${NC}"
 else
     echo -e "${RED}Port missing! Something went wrong.${NC}"
 fi
 
-# Verify Gunicorn is responding
+# Проверка Gunicorn
 sleep 2
 if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/ | grep -q '302\|301'; then
     echo -e "${GREEN}Gunicorn is responding.${NC}"
@@ -166,7 +175,15 @@ else
     echo -e "${RED}Gunicorn not reachable on port 8000!${NC}"
 fi
 
-# --- Admin user creation ---
+# Проверка C-обёртки
+echo -e "\n${GREEN}Testing SUID wrapper...${NC}"
+if sudo -u $APP_USER /usr/local/bin/postfix-reload 2>&1; then
+    echo -e "${GREEN}SUID wrapper works correctly.${NC}"
+else
+    echo -e "${RED}SUID wrapper test failed. Check /usr/local/bin/postfix-reload${NC}"
+fi
+
+# --- Создание администратора ---
 echo -e "\n${BLUE}=========================================${NC}"
 echo -e "${BLUE}Creating admin user${NC}"
 echo -e "${BLUE}=========================================${NC}"
