@@ -22,7 +22,7 @@ echo -e "${BLUE}=========================================${NC}"
 
 echo -e "\n${GREEN}Installing system dependencies...${NC}"
 dnf install -y epel-release
-dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl gcc
+dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl
 
 echo -e "\n${GREEN}Installing Flask-Login...${NC}"
 pip3 install flask-login
@@ -59,27 +59,7 @@ else
     exit 1
 fi
 
-# --- Создание C-обёртки для postfix reload ---
-echo -e "\n${GREEN}Creating SUID C-wrapper for postfix reload...${NC}"
-cat > /tmp/postfix-reload.c << 'EOF'
-#include <unistd.h>
-#include <stdlib.h>
-#include <sys/types.h>
-
-int main() {
-    setreuid(0, 0);
-    setregid(0, 0);
-    return system("/usr/sbin/postfix reload");
-}
-EOF
-
-gcc -o /usr/local/bin/postfix-reload /tmp/postfix-reload.c
-rm -f /tmp/postfix-reload.c
-
-chown root:$APP_GROUP /usr/local/bin/postfix-reload
-chmod 4750 /usr/local/bin/postfix-reload
-
-echo -e "\n${GREEN}Creating systemd service with Gunicorn...${NC}"
+echo -e "\n${GREEN}Creating systemd service with Gunicorn (root)...${NC}"
 SECRET_KEY=$(openssl rand -hex 32)
 cat > /etc/systemd/system/postfix-admin.service << EOF
 [Unit]
@@ -88,8 +68,8 @@ After=network.target postfix.service
 
 [Service]
 Type=simple
-User=$APP_USER
-Group=$APP_GROUP
+User=root
+Group=root
 WorkingDirectory=$INSTALL_DIR
 Environment="SECRET_KEY=$SECRET_KEY"
 Environment="USERS_FILE=$INSTALL_DIR/users.json"
@@ -97,9 +77,6 @@ Environment="PYTHONPATH=/usr/local/lib/python3.9/site-packages"
 ExecStart=/usr/bin/gunicorn -w 4 -b 127.0.0.1:8000 app:app
 Restart=always
 RestartSec=10
-
-# Разрешаем выполнение SUID-бинарников
-NoNewPrivileges=no
 
 [Install]
 WantedBy=multi-user.target
@@ -110,14 +87,6 @@ systemctl enable postfix-admin
 
 echo -e "\n${GREEN}Setting permissions...${NC}"
 chown -R $APP_USER:$APP_GROUP $INSTALL_DIR
-usermod -a -G postfix $APP_USER
-
-# Права на /etc/postfix
-chown root:postfix /etc/postfix
-chmod 775 /etc/postfix
-chmod 664 /etc/postfix/main.cf 2>/dev/null || true
-chmod 664 /etc/postfix/transport 2>/dev/null || true
-chmod 664 /etc/postfix/sender_transport 2>/dev/null || true
 
 echo "{}" > $INSTALL_DIR/users.json
 chown $APP_USER:$APP_GROUP $INSTALL_DIR/users.json
@@ -138,13 +107,6 @@ fi
 echo -e "\n${GREEN}Firewall...${NC}"
 firewall-cmd --permanent --add-service=http --add-service=https 2>/dev/null || true
 firewall-cmd --reload 2>/dev/null || true
-
-# --- SELinux (если включен) ---
-if command -v semanage &> /dev/null && [ "$(getenforce)" != "Disabled" ]; then
-    echo -e "\n${YELLOW}SELinux detected, adding policy for SUID wrapper...${NC}"
-    semanage fcontext -a -t bin_t /usr/local/bin/postfix-reload 2>/dev/null || true
-    restorecon -v /usr/local/bin/postfix-reload
-fi
 
 # Запуск сервисов
 echo -e "\n${GREEN}Starting postfix-admin with Gunicorn...${NC}"
@@ -174,14 +136,6 @@ if ss -tlnp | grep ':443 ' && ss -tlnp | grep ':8000 '; then
     echo -e "${GREEN}Both ports 443 and 8000 are listening.${NC}"
 else
     echo -e "${RED}Port missing! Something went wrong.${NC}"
-fi
-
-# Проверка C-обёртки
-echo -e "\n${GREEN}Testing SUID wrapper...${NC}"
-if sudo -u $APP_USER /usr/local/bin/postfix-reload 2>&1; then
-    echo -e "${GREEN}SUID wrapper works correctly.${NC}"
-else
-    echo -e "${RED}SUID wrapper test failed! Check permissions and SELinux.${NC}"
 fi
 
 # --- Создание администратора ---
