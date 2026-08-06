@@ -306,50 +306,89 @@ def sanitize_input(value):
     return value
 
 # --- Relay Host Management ---
+def extract_host_port(transport_str):
+    """Извлекает чистый хост и порт из строки транспорта"""
+    host = transport_str
+    port = 25  # По умолчанию SMTP
+    
+    # Убираем префикс транспорта
+    if host.startswith('smtp:'):
+        host = host[5:]
+    elif host.startswith('lmtp:'):
+        host = host[5:]
+    elif host.startswith('relay:'):
+        host = host[6:]
+    
+    # Обработка IPv6 в квадратных скобках [::1]:587
+    if host.startswith('['):
+        match = re.match(r'\[([^\]]+)\](?::(\d+))?', host)
+        if match:
+            host = match.group(1)
+            if match.group(2):
+                port = int(match.group(2))
+    else:
+        # Обычный формат host:port
+        parts = host.rsplit(':', 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            host = parts[0]
+            port = int(parts[1])
+    
+    return host, port
+
 def get_relay_hosts():
     """Извлекает список уникальных релей-хостов из sender_transport"""
     entries = parse_sender_transport()
     hosts = {}
     for entry in entries:
         transport = entry['transport']
-        # Извлекаем хост из smtp:host:port
-        host = transport.replace('smtp:', '').replace('lmtp:', '').split(':')[0] if ':' in transport else transport
-        if host not in hosts:
-            hosts[host] = {
-                'host': host,
+        clean_host, port = extract_host_port(transport)
+        
+        if clean_host not in hosts:
+            hosts[clean_host] = {
+                'host': clean_host,
                 'transport': transport,
+                'port': port,
                 'senders': [],
                 'count': 0
             }
-        hosts[host]['senders'].append(entry['sender'])
-        hosts[host]['count'] += 1
+        hosts[clean_host]['senders'].append(entry['sender'])
+        hosts[clean_host]['count'] += 1
     return list(hosts.values())
 
-def check_relay_host(host):
-    """Проверка доступности релей-хоста"""
-    # Извлекаем хост и порт
-    port = 25
-    if ':' in host:
-        parts = host.split(':')
-        host = parts[0]
-        try:
-            port = int(parts[1]) if len(parts) > 1 else 25
-        except:
-            pass
+def check_relay_host(host_str):
+    """Проверка доступности релей-хоста (любой порт)"""
+    host, port = extract_host_port(host_str)
     
     try:
-        result = subprocess.run(
-            ['timeout', '5', 'bash', '-c', f'echo QUIT | nc -w 3 {host} {port} 2>&1'],
-            capture_output=True, text=True, timeout=10
-        )
-        if '220' in result.stdout or 'ESMTP' in result.stdout:
-            return True, 'Server responded'
-        elif result.returncode == 124:
-            return False, 'Connection timeout'
+        # Пробуем nc, если нет — используем bash /dev/tcp
+        nc_result = subprocess.run(['which', 'nc'], capture_output=True, timeout=2)
+        
+        if nc_result.returncode == 0:
+            # Используем nc
+            result = subprocess.run(
+                ['timeout', '5', 'nc', '-w', '3', host, str(port)],
+                input='QUIT\n',
+                capture_output=True, text=True, timeout=10
+            )
         else:
-            return False, result.stderr.strip() or 'No response'
+            # Используем bash /dev/tcp (работает без nc)
+            result = subprocess.run(
+                ['timeout', '5', 'bash', '-c', 
+                 f'exec 3<>/dev/tcp/{host}/{port} 2>/dev/null && echo "QUIT" >&3 && head -1 <&3 && exec 3>&-'],
+                capture_output=True, text=True, timeout=10
+            )
+        
+        if '220' in result.stdout or 'ESMTP' in result.stdout:
+            return True, f'Server responded on port {port}'
+        elif result.returncode == 124:
+            return False, f'Connection timeout on port {port}'
+        else:
+            return False, f'No SMTP response on port {port}'
+            
+    except subprocess.TimeoutExpired:
+        return False, f'Connection timeout on port {port}'
     except Exception as e:
-        return False, str(e)
+        return False, f'Error: {str(e)}'
 
 # ===== ROUTES =====
 @app.route('/')
@@ -699,7 +738,6 @@ def delete_sender_routing():
 @admin_required
 def relay_hosts():
     hosts = get_relay_hosts()
-    # Проверяем статус каждого хоста
     for host in hosts:
         host['status'], host['status_msg'] = check_relay_host(host['host'])
     return render_template('relay_hosts.html', hosts=hosts)
@@ -719,7 +757,6 @@ def check_host(host):
 @login_required
 @admin_required
 def replace_relay_host():
-    """Массовая замена релей-хоста во всех правилах"""
     old_host = sanitize_input(request.form.get('old_host',''))
     new_host = sanitize_input(request.form.get('new_host',''))
     
