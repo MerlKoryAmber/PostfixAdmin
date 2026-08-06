@@ -1,33 +1,59 @@
 :root {
-    --primary: #1a237e;
-    --secondary: #283593;
-    --accent: #3949ab;
-    --success: #2e7d32;
-    --danger: #c62828;
-    --warning: #f57f17;
-    --light: #f5f5f5;
-    --dark: #1a1a1a;
+    --interros-blue: #1a237e;
+    --interros-dark-blue: #0d1542;
+    --interros-gold: #c6a962;
+    --interros-light-gold: #d4c08c;
+    --interros-white: #ffffff;
+    --interros-light: #f5f5f5;
+    --interros-gray: #6c757d;
+    --interros-dark: #1a1a1a;
+    /* Спокойные цвета кнопок */
+    --btn-success: #5a7d5a;
+    --btn-success-hover: #4a6d4a;
+    --btn-warning: #8a7d5a;
+    --btn-warning-hover: #7a6d4a;
+    --btn-danger: #8a5a5a;
+    --btn-danger-hover: #7a4a4a;
+    --btn-info: #5a7d8a;
+    --btn-info-hover: #4a6d7a;
 }
 
 body {
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     min-height: 100vh;
 }
 
+/* Навигация */
 .navbar {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%) !important;
-    box-shadow: 0 2px 4px rgba(0,0,0,.1);
+    background: linear-gradient(135deg, var(--interros-dark-blue) 0%, var(--interros-blue) 100%) !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    border-bottom: 2px solid var(--interros-gold);
 }
 
 .navbar-brand {
     font-weight: 700;
     letter-spacing: 0.5px;
+    color: var(--interros-white) !important;
+}
+
+.navbar-brand img {
+    filter: brightness(0) invert(1);
 }
 
 .nav-link {
+    color: rgba(255,255,255,.85) !important;
     position: relative;
     transition: all 0.3s ease;
+    font-weight: 500;
+}
+
+.nav-link:hover {
+    color: var(--interros-gold) !important;
+}
+
+.nav-link.active {
+    color: var(--interros-gold) !important;
 }
 
 .nav-link.active::after {
@@ -38,10 +64,21 @@ body {
     transform: translateX(-50%);
     width: 80%;
     height: 2px;
-    background: white;
+    background: var(--interros-gold);
     border-radius: 2px;
 }
 
+.dropdown-menu {
+    border: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,.1);
+}
+
+.dropdown-item:hover {
+    background-color: var(--interros-blue);
+    color: var(--interros-white) !important;
+}
+
+/* Карточки */
 .card {
     border: none;
     border-radius: 12px;
@@ -55,53 +92,365 @@ body {
 }
 
 .card-header {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
-    color: white;
+    background: linear-gradient(135deg, var(--interros-dark-blue) 0%, var(--interros-blue) 100%);
+    color: var(--interros-white);
     border-radius: 12px 12px 0 0 !important;
     border: none;
+    border-bottom: 2px solid var(--interros-gold);
+}
+
+/* Основные кнопки */
+.btn {
+    transition: all 0.3s ease;
+    font-weight: 500;
 }
 
 .btn-primary {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
-    border: none;
-    transition: all 0.3s ease;
+    background: linear-gradient(135deg, var(--interros-dark-blue) 0%, var(--interros-blue) 100%);
+    border: 1px solid var(--interros-dark-blue);
+    color: var(--interros-white);
 }
 
 .btn-primary:hover {
+    background: linear-gradient(135deg, var(--interros-blue) 0%, #283593 100%);
+    border-color: var(--interros-blue);
     transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(26,35,126,.3);
+    box-shadow: 0 4px 12px rgba(26,35,126,.3);
+    color: var(--interros-gold);
 }
 
+.btn-success {
+    background-color: var(--btn-success);
+    border-color: var(--btn-success);
+    color: white;
+}
+
+.btn-success:hover {
+    background-color: var(--btn-success-hover);
+    border-color: var(--btn-success-hover);
+    color: white;
+}
+
+.btn-warning {
+    background-color: var(--btn-warning);
+    border-color: var(--btn-warning);
+    color: white;
+}
+
+.btn-warning:hover {
+    background-color: var(--btn-warning-hover);
+    border-color: var(--btn-warning-hover);
+    color: white;
+}
+
+.btn-danger {
+    background-color: var(--btn-danger);
+    border-color: var(--btn-danger);
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: var(--btn-danger-hover);
+    border-color: var(--btn-danger-hover);
+    color: white;
+}
+
+.btn-info {
+    background-color: var(--btn-info);
+    border-color: var(--btn-info);
+    color: white;
+}
+
+.btn-info:hover {
+    background-color: var(--btn-info-hover);
+    border-color: var(--btn-info-hover);
+    color: white;
+}
+
+.btn-secondary {
+    background-color: var(--interros-gray);
+    border-color: var(--interros-gray);
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: #5a6268;
+    border-color: #545b62;
+    color: white;
+}
+
+/* Outline кнопки */
+.btn-outline-primary {
+    border-color: var(--interros-blue);
+    color: var(--interros-blue);
+}
+
+.btn-outline-primary:hover {
+    background-color: var(--interros-blue);
+    color: var(--interros-white);
+}
+
+.btn-outline-success {
+    border-color: var(--btn-success);
+    color: var(--btn-success);
+}
+
+.btn-outline-success:hover {
+    background-color: var(--btn-success);
+    color: white;
+}
+
+.btn-outline-warning {
+    border-color: var(--btn-warning);
+    color: var(--btn-warning);
+}
+
+.btn-outline-warning:hover {
+    background-color: var(--btn-warning);
+    color: white;
+}
+
+.btn-outline-danger {
+    border-color: var(--btn-danger);
+    color: var(--btn-danger);
+}
+
+.btn-outline-danger:hover {
+    background-color: var(--btn-danger);
+    color: white;
+}
+
+.btn-outline-info {
+    border-color: var(--btn-info);
+    color: var(--btn-info);
+}
+
+.btn-outline-info:hover {
+    background-color: var(--btn-info);
+    color: white;
+}
+
+.btn-outline-secondary {
+    border-color: var(--interros-gray);
+    color: var(--interros-gray);
+}
+
+.btn-outline-secondary:hover {
+    background-color: var(--interros-gray);
+    color: white;
+}
+
+/* Маленькие кнопки */
+.btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+
+/* Группа кнопок */
+.btn-group .btn {
+    margin-right: 1px;
+}
+
+/* Таблицы */
 .table {
     border-radius: 8px;
     overflow: hidden;
 }
 
 .table thead th {
-    background: var(--primary);
-    color: white;
+    background: var(--interros-dark-blue);
+    color: var(--interros-white);
     border: none;
     font-weight: 500;
+    padding: 12px 8px;
 }
 
 .table-hover tbody tr:hover {
     background-color: rgba(26,35,126,.05);
 }
 
+.table-striped > tbody > tr:nth-of-type(odd) {
+    background-color: rgba(0,0,0,.02);
+}
+
+/* Оповещения */
 .alert {
     border: none;
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0,0,0,.05);
 }
 
+.alert-success {
+    background-color: #e8f0e8;
+    color: var(--btn-success);
+    border-left: 4px solid var(--btn-success);
+}
+
+.alert-danger {
+    background-color: #f0e8e8;
+    color: var(--btn-danger);
+    border-left: 4px solid var(--btn-danger);
+}
+
+.alert-warning {
+    background-color: #f0ede8;
+    color: var(--btn-warning);
+    border-left: 4px solid var(--btn-warning);
+}
+
+.alert-info {
+    background-color: #e8edf0;
+    color: var(--btn-info);
+    border-left: 4px solid var(--btn-info);
+}
+
+/* Формы */
+.form-control:focus {
+    border-color: var(--interros-gold);
+    box-shadow: 0 0 0 0.2rem rgba(198,169,98,.25);
+}
+
+.form-select:focus {
+    border-color: var(--interros-gold);
+    box-shadow: 0 0 0 0.2rem rgba(198,169,98,.25);
+}
+
+.form-label {
+    font-weight: 500;
+    color: var(--interros-dark);
+}
+
+/* Просмотр логов */
 .log-viewer {
-    background: var(--dark);
+    background: var(--interros-dark);
     border-radius: 8px;
     font-family: 'Courier New', monospace;
     font-size: 13px;
+    color: #00ff00;
 }
 
-footer {
-    background: var(--primary) !important;
+.log-viewer pre {
+    color: #a8d8a8;
+    background: transparent;
+    border: none;
+    margin: 0;
+    padding: 15px;
+}
+
+/* Badge */
+.badge {
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 4px 8px;
+}
+
+.bg-success {
+    background-color: var(--btn-success) !important;
+}
+
+.bg-danger {
+    background-color: var(--btn-danger) !important;
+}
+
+.bg-warning {
+    background-color: var(--btn-warning) !important;
     color: white !important;
+}
+
+.bg-info {
+    background-color: var(--btn-info) !important;
+}
+
+.bg-primary {
+    background-color: var(--interros-blue) !important;
+}
+
+.bg-secondary {
+    background-color: var(--interros-gray) !important;
+}
+
+/* Footer */
+footer {
+    background: linear-gradient(135deg, var(--interros-dark-blue) 0%, var(--interros-blue) 100%) !important;
+    color: var(--interros-white) !important;
+    border-top: 2px solid var(--interros-gold);
+}
+
+/* Модальные окна */
+.modal-content {
+    border: none;
+    border-radius: 12px;
+}
+
+.modal-header {
+    background: linear-gradient(135deg, var(--interros-dark-blue) 0%, var(--interros-blue) 100%);
+    color: var(--interros-white);
+    border-radius: 12px 12px 0 0;
+    border-bottom: 2px solid var(--interros-gold);
+}
+
+.modal-header .btn-close {
+    filter: brightness(0) invert(1);
+}
+
+/* Код */
+code {
+    background-color: #f4f4f4;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 90%;
+    color: var(--interros-blue);
+}
+
+/* Ссылки */
+a {
+    color: var(--interros-blue);
+    text-decoration: none;
+}
+
+a:hover {
+    color: var(--interros-dark-blue);
+    text-decoration: underline;
+}
+
+/* Текст */
+.text-muted {
+    color: var(--interros-gray) !important;
+}
+
+.text-success {
+    color: var(--btn-success) !important;
+}
+
+.text-danger {
+    color: var(--btn-danger) !important;
+}
+
+.text-warning {
+    color: var(--btn-warning) !important;
+}
+
+.text-info {
+    color: var(--btn-info) !important;
+}
+
+/* Карточки статистики */
+.card.bg-primary {
+    background: linear-gradient(135deg, var(--interros-dark-blue) 0%, var(--interros-blue) 100%) !important;
+}
+
+.card.bg-success {
+    background-color: var(--btn-success) !important;
+}
+
+.card.bg-warning {
+    background-color: var(--btn-warning) !important;
+}
+
+.card.bg-info {
+    background-color: var(--btn-info) !important;
+}
+
+.card.bg-danger {
+    background-color: var(--btn-danger) !important;
 }
