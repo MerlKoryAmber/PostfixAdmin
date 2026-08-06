@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Postfix Web Admin Interface
-Copyright (c) 2024 InterROS
+Copyright (c) 2026 InterROS
 """
 
 import os
@@ -38,7 +38,12 @@ IP_WHITELIST_FILE = '/opt/postfix-admin/ip_whitelist.json'
 LOG_FILE = '/var/log/maillog'
 MAX_LOG_LINES = 500
 
-# --- IP Whitelist Management ---
+# --- Context processor for dynamic year ---
+@app.context_processor
+def inject_year():
+    return {'current_year': datetime.now().year}
+
+# --- IP Whitelist Management (без изменений) ---
 def load_ip_whitelist():
     if os.path.exists(IP_WHITELIST_FILE):
         try:
@@ -88,7 +93,7 @@ def enforce_https():
         url = request.url.replace('http://', 'https://', 1)
         return redirect(url, code=301)
 
-# --- Flask-Login Setup ---
+# --- Flask-Login Setup (без изменений) ---
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
@@ -135,7 +140,7 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# --- Configuration Parameters ---
+# --- Configuration Parameters (без изменений) ---
 IMPORTANT_PARAMS = {
     'myhostname': {
         'name': 'Hostname',
@@ -307,7 +312,7 @@ def sanitize_input(value):
         value = value.replace(char, '')
     return value
 
-# --- Relay Host Management ---
+# --- Relay Host Management (улучшенная проверка) ---
 def extract_host_port(transport_str):
     host = transport_str
     port = 25
