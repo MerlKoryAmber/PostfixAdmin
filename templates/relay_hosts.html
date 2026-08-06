@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>🖥️ Relay Hosts</h2>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#replaceModal">
+        🔄 Mass Replace
+    </button>
+</div>
+
+<div class="alert alert-info">
+    <strong>How it works:</strong> This page shows all unique relay hosts from sender-dependent routing rules. 
+    You can check host availability and perform mass replacement of relay hosts.
+</div>
+
+<!-- Список хостов -->
+<div class="row">
+    {% for host in hosts %}
+    <div class="col-md-6 mb-3">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><strong>{{ host.host }}</strong></span>
+                <span>
+                    {% if host.status %}
+                        <span class="badge bg-success">Online</span>
+                    {% else %}
+                        <span class="badge bg-danger">Offline</span>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="card-body">
+                <div class="row mb-2">
+                    <div class="col-6">
+                        <small class="text-muted">Transport:</small><br>
+                        <code>{{ host.transport }}</code>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">Rules count:</small><br>
+                        <strong>{{ host.count }}</strong>
+                    </div>
+                </div>
+                
+                {% if host.status_msg %}
+                <div class="alert alert-{{ 'success' if host.status else 'danger' }} py-1 px-2 mb-2 small">
+                    {{ host.status_msg }}
+                </div>
+                {% endif %}
+                
+                <div class="mb-2">
+                    <small class="text-muted">Senders using this host:</small>
+                    <div class="small" style="max-height: 100px; overflow-y: auto;">
+                        {% for sender in host.senders[:10] %}
+                            <span class="badge bg-secondary me-1 mb-1">{{ sender }}</span>
+                        {% endfor %}
+                        {% if host.senders|length > 10 %}
+                            <span class="text-muted">... and {{ host.senders|length - 10 }} more</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <a href="{{ url_for('check_host', host=host.host) }}" class="btn btn-sm btn-outline-info">
+                    🔍 Check Again
+                </a>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="col-12">
+        <div class="alert alert-warning">No relay hosts found. Add sender routing rules first.</div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Модальное окно замены хоста -->
+<div class="modal fade" id="replaceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Mass Replace Relay Host</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('replace_relay_host') }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Old Host</label>
+                        <select class="form-select" name="old_host" required>
+                            <option value="">Select host...</option>
+                            {% for host in hosts %}
+                            <option value="{{ host.host }}">{{ host.host }} ({{ host.count }} rules)</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">New Host</label>
+                        <input type="text" class="form-control" name="new_host" 
+                               placeholder="smtp:new-host.com:587" required>
+                        <div class="form-text">Format: smtp:hostname:port</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Replace All</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

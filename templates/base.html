@@ -35,6 +35,10 @@
                            href="{{ url_for('sender_routing') }}">🚀 Routing</a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'relay_hosts' %}active{% endif %}" 
+                           href="{{ url_for('relay_hosts') }}">🖥️ Relay Hosts</a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'view_queue' %}active{% endif %}" 
                            href="{{ url_for('view_queue') }}">📬 Queue</a>
                     </li>

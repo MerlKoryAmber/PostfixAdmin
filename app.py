@@ -187,7 +187,7 @@ IMPORTANT_PARAMS = {
     },
     'sender_dependent_relayhost_maps': {
         'name': 'Sender Relayhost Maps',
-        'description': 'Path to sender-dependent relayhost map (e.g., hash:/etc/postfix/sender_transport)',
+        'description': 'Path to sender-dependent relayhost map',
         'type': 'text',
         'required': False
     }
@@ -304,6 +304,52 @@ def sanitize_input(value):
     for char in [';','|','&','$','`','(',')','{','}','<','>','\n','\r']:
         value = value.replace(char, '')
     return value
+
+# --- Relay Host Management ---
+def get_relay_hosts():
+    """Извлекает список уникальных релей-хостов из sender_transport"""
+    entries = parse_sender_transport()
+    hosts = {}
+    for entry in entries:
+        transport = entry['transport']
+        # Извлекаем хост из smtp:host:port
+        host = transport.replace('smtp:', '').replace('lmtp:', '').split(':')[0] if ':' in transport else transport
+        if host not in hosts:
+            hosts[host] = {
+                'host': host,
+                'transport': transport,
+                'senders': [],
+                'count': 0
+            }
+        hosts[host]['senders'].append(entry['sender'])
+        hosts[host]['count'] += 1
+    return list(hosts.values())
+
+def check_relay_host(host):
+    """Проверка доступности релей-хоста"""
+    # Извлекаем хост и порт
+    port = 25
+    if ':' in host:
+        parts = host.split(':')
+        host = parts[0]
+        try:
+            port = int(parts[1]) if len(parts) > 1 else 25
+        except:
+            pass
+    
+    try:
+        result = subprocess.run(
+            ['timeout', '5', 'bash', '-c', f'echo QUIT | nc -w 3 {host} {port} 2>&1'],
+            capture_output=True, text=True, timeout=10
+        )
+        if '220' in result.stdout or 'ESMTP' in result.stdout:
+            return True, 'Server responded'
+        elif result.returncode == 124:
+            return False, 'Connection timeout'
+        else:
+            return False, result.stderr.strip() or 'No response'
+    except Exception as e:
+        return False, str(e)
 
 # ===== ROUTES =====
 @app.route('/')
@@ -647,17 +693,77 @@ def delete_sender_routing():
         flash(f'Error: {error}', 'danger')
     return redirect(url_for('sender_routing'))
 
-# --- Mail Queue (расширенное управление) ---
+# --- Relay Hosts Management ---
+@app.route('/relay-hosts')
+@login_required
+@admin_required
+def relay_hosts():
+    hosts = get_relay_hosts()
+    # Проверяем статус каждого хоста
+    for host in hosts:
+        host['status'], host['status_msg'] = check_relay_host(host['host'])
+    return render_template('relay_hosts.html', hosts=hosts)
+
+@app.route('/relay-hosts/check/<path:host>')
+@login_required
+@admin_required
+def check_host(host):
+    status, msg = check_relay_host(host)
+    if status:
+        flash(f'✅ Host {host} is reachable: {msg}', 'success')
+    else:
+        flash(f'❌ Host {host} is unreachable: {msg}', 'danger')
+    return redirect(url_for('relay_hosts'))
+
+@app.route('/relay-hosts/replace', methods=['POST'])
+@login_required
+@admin_required
+def replace_relay_host():
+    """Массовая замена релей-хоста во всех правилах"""
+    old_host = sanitize_input(request.form.get('old_host',''))
+    new_host = sanitize_input(request.form.get('new_host',''))
+    
+    if not old_host or not new_host:
+        flash('Both old and new host are required', 'danger')
+        return redirect(url_for('relay_hosts'))
+    
+    entries = parse_sender_transport()
+    changed = 0
+    for entry in entries:
+        if old_host in entry['transport']:
+            entry['transport'] = entry['transport'].replace(old_host, new_host)
+            changed += 1
+    
+    if changed == 0:
+        flash(f'No rules found with host {old_host}', 'warning')
+        return redirect(url_for('relay_hosts'))
+    
+    sender_file = get_sender_transport_file()
+    content = "# Postfix sender-dependent relayhost map\n# Managed via web interface\n\n"
+    for entry in entries:
+        line = f"{entry['sender']}\t{entry['transport']}"
+        if entry.get('options'):
+            for k, v in entry['options'].items():
+                if v: line += f" {k}={v}"
+        content += line + "\n"
+    
+    success, error = atomic_write_file(sender_file, content)
+    if success:
+        subprocess.run(['/usr/sbin/postmap', sender_file], check=True, capture_output=True)
+        flash(f'Replaced {old_host} → {new_host} in {changed} rules', 'success')
+    else:
+        flash(f'Error saving: {error}', 'danger')
+    
+    return redirect(url_for('relay_hosts'))
+
+# --- Mail Queue ---
 @app.route('/queue')
 @login_required
 @admin_required
 def view_queue():
     entries = []
     try:
-        result = subprocess.run(
-            ['/usr/sbin/postqueue', '-p'],
-            capture_output=True, text=True, timeout=15
-        )
+        result = subprocess.run(['/usr/sbin/postqueue', '-p'], capture_output=True, text=True, timeout=15)
         if result.returncode == 0:
             lines = result.stdout.strip().split('\n')
             in_queue = False
@@ -675,7 +781,6 @@ def view_queue():
     except Exception as e:
         flash(f'Error reading queue: {str(e)}', 'danger')
     
-    # Статистика очереди
     stats = {'total': len(entries), 'active': 0, 'deferred': 0, 'hold': 0}
     for entry in entries:
         if 'active' in entry['status'].lower():
@@ -691,18 +796,12 @@ def view_queue():
 @login_required
 @admin_required
 def view_message_detail(queue_id):
-    """Просмотр содержимого сообщения в очереди"""
     try:
-        # Получаем информацию о сообщении
-        result = subprocess.run(
-            ['/usr/sbin/postcat', '-q', queue_id],
-            capture_output=True, text=True, timeout=10
-        )
+        result = subprocess.run(['/usr/sbin/postcat', '-q', queue_id], capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
             flash(f'Message {queue_id} not found', 'danger')
             return redirect(url_for('view_queue'))
         
-        # Парсим вывод postcat
         headers = {}
         body = ''
         in_body = False
@@ -715,10 +814,7 @@ def view_message_detail(queue_id):
                 key, value = line.split(':', 1)
                 headers[key.strip()] = value.strip()
         
-        return render_template('message_detail.html', 
-                               queue_id=queue_id, 
-                               headers=headers, 
-                               body=body)
+        return render_template('message_detail.html', queue_id=queue_id, headers=headers, body=body)
     except Exception as e:
         flash(f'Error: {str(e)}', 'danger')
         return redirect(url_for('view_queue'))
@@ -729,9 +825,9 @@ def view_message_detail(queue_id):
 def flush_queue():
     try:
         subprocess.run(['/usr/sbin/postqueue', '-f'], check=True, capture_output=True, timeout=30)
-        flash('Queue flush initiated successfully', 'success')
+        flash('Queue flush initiated', 'success')
     except subprocess.CalledProcessError as e:
-        flash(f'Error flushing queue: {e.stderr.decode().strip()}', 'danger')
+        flash(f'Error: {e.stderr.decode().strip()}', 'danger')
     return redirect(url_for('view_queue'))
 
 @app.route('/queue/delete/<queue_id>')
@@ -739,25 +835,18 @@ def flush_queue():
 @admin_required
 def delete_queue_message(queue_id):
     try:
-        subprocess.run(
-            ['/usr/sbin/postsuper', '-d', queue_id],
-            check=True, capture_output=True, timeout=10
-        )
+        subprocess.run(['/usr/sbin/postsuper', '-d', queue_id], check=True, capture_output=True, timeout=10)
         flash(f'Message {queue_id} deleted', 'success')
     except subprocess.CalledProcessError as e:
-        flash(f'Error deleting message: {e.stderr.decode().strip()}', 'danger')
+        flash(f'Error: {e.stderr.decode().strip()}', 'danger')
     return redirect(url_for('view_queue'))
 
 @app.route('/queue/hold/<queue_id>')
 @login_required
 @admin_required
 def hold_message(queue_id):
-    """Удержание сообщения"""
     try:
-        subprocess.run(
-            ['/usr/sbin/postsuper', '-h', queue_id],
-            check=True, capture_output=True, timeout=10
-        )
+        subprocess.run(['/usr/sbin/postsuper', '-h', queue_id], check=True, capture_output=True, timeout=10)
         flash(f'Message {queue_id} placed on hold', 'success')
     except subprocess.CalledProcessError as e:
         flash(f'Error: {e.stderr.decode().strip()}', 'danger')
@@ -767,12 +856,8 @@ def hold_message(queue_id):
 @login_required
 @admin_required
 def release_message(queue_id):
-    """Освобождение удержанного сообщения"""
     try:
-        subprocess.run(
-            ['/usr/sbin/postsuper', '-H', queue_id],
-            check=True, capture_output=True, timeout=10
-        )
+        subprocess.run(['/usr/sbin/postsuper', '-H', queue_id], check=True, capture_output=True, timeout=10)
         flash(f'Message {queue_id} released from hold', 'success')
     except subprocess.CalledProcessError as e:
         flash(f'Error: {e.stderr.decode().strip()}', 'danger')
@@ -782,12 +867,8 @@ def release_message(queue_id):
 @login_required
 @admin_required
 def requeue_message(queue_id):
-    """Повторная постановка в очередь"""
     try:
-        subprocess.run(
-            ['/usr/sbin/postsuper', '-r', queue_id],
-            check=True, capture_output=True, timeout=10
-        )
+        subprocess.run(['/usr/sbin/postsuper', '-r', queue_id], check=True, capture_output=True, timeout=10)
         flash(f'Message {queue_id} requeued', 'success')
     except subprocess.CalledProcessError as e:
         flash(f'Error: {e.stderr.decode().strip()}', 'danger')
@@ -798,11 +879,8 @@ def requeue_message(queue_id):
 @admin_required
 def delete_all_queue():
     try:
-        subprocess.run(
-            ['/usr/sbin/postsuper', '-d', 'ALL'],
-            check=True, capture_output=True, timeout=30
-        )
-        flash('All messages deleted (active deliveries preserved)', 'success')
+        subprocess.run(['/usr/sbin/postsuper', '-d', 'ALL'], check=True, capture_output=True, timeout=30)
+        flash('All messages deleted', 'success')
     except subprocess.CalledProcessError as e:
         flash(f'Error: {e.stderr.decode().strip()}', 'danger')
     return redirect(url_for('view_queue'))
@@ -812,10 +890,7 @@ def delete_all_queue():
 @admin_required
 def delete_deferred():
     try:
-        subprocess.run(
-            ['/usr/sbin/postsuper', '-d', 'ALL', 'deferred'],
-            check=True, capture_output=True, timeout=30
-        )
+        subprocess.run(['/usr/sbin/postsuper', '-d', 'ALL', 'deferred'], check=True, capture_output=True, timeout=30)
         flash('All deferred messages deleted', 'success')
     except subprocess.CalledProcessError as e:
         flash(f'Error: {e.stderr.decode().strip()}', 'danger')
@@ -825,32 +900,21 @@ def delete_deferred():
 @login_required
 @admin_required
 def delete_by_sender():
-    """Удаление сообщений по отправителю"""
     sender = sanitize_input(request.form.get('sender',''))
     if not sender:
         flash('Sender is required', 'danger')
         return redirect(url_for('view_queue'))
-    
     try:
-        # Получаем список ID сообщений от указанного отправителя
-        result = subprocess.run(
-            ['/usr/sbin/postqueue', '-p'],
-            capture_output=True, text=True, timeout=10
-        )
+        result = subprocess.run(['/usr/sbin/postqueue', '-p'], capture_output=True, text=True, timeout=10)
         deleted = 0
         for line in result.stdout.split('\n'):
             if sender in line:
                 parts = line.split()
                 if parts:
                     try:
-                        subprocess.run(
-                            ['/usr/sbin/postsuper', '-d', parts[0]],
-                            check=True, capture_output=True, timeout=5
-                        )
+                        subprocess.run(['/usr/sbin/postsuper', '-d', parts[0]], check=True, capture_output=True, timeout=5)
                         deleted += 1
-                    except:
-                        pass
-        
+                    except: pass
         flash(f'Deleted {deleted} messages from sender {sender}', 'success')
     except Exception as e:
         flash(f'Error: {str(e)}', 'danger')
@@ -860,31 +924,21 @@ def delete_by_sender():
 @login_required
 @admin_required
 def delete_by_domain():
-    """Удаление сообщений по домену получателя"""
     domain = sanitize_input(request.form.get('domain',''))
     if not domain:
         flash('Domain is required', 'danger')
         return redirect(url_for('view_queue'))
-    
     try:
-        result = subprocess.run(
-            ['/usr/sbin/postqueue', '-p'],
-            capture_output=True, text=True, timeout=10
-        )
+        result = subprocess.run(['/usr/sbin/postqueue', '-p'], capture_output=True, text=True, timeout=10)
         deleted = 0
         for line in result.stdout.split('\n'):
             if domain in line:
                 parts = line.split()
                 if parts:
                     try:
-                        subprocess.run(
-                            ['/usr/sbin/postsuper', '-d', parts[0]],
-                            check=True, capture_output=True, timeout=5
-                        )
+                        subprocess.run(['/usr/sbin/postsuper', '-d', parts[0]], check=True, capture_output=True, timeout=5)
                         deleted += 1
-                    except:
-                        pass
-        
+                    except: pass
         flash(f'Deleted {deleted} messages for domain {domain}', 'success')
     except Exception as e:
         flash(f'Error: {str(e)}', 'danger')
