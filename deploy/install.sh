@@ -15,6 +15,7 @@ fi
 INSTALL_DIR="/opt/postfix-admin"
 APP_USER="postfixadmin"
 APP_GROUP="postfixadmin"
+WHEEL_FILE="$(dirname "$0")/Flask_Login-0.6.3-py3-none-any.whl"
 
 echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}Postfix Admin Installation${NC}"
@@ -25,7 +26,15 @@ dnf install -y epel-release
 dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl
 
 echo -e "\n${GREEN}Installing Flask-Login...${NC}"
-pip3 install flask-login
+if [ -f "$WHEEL_FILE" ]; then
+    pip3 install "$WHEEL_FILE"
+else
+    echo -e "${YELLOW}Flask-Login wheel not found in deploy/, attempting online install...${NC}"
+    pip3 install flask-login || {
+        echo -e "${RED}Failed to install Flask-Login. Please download the wheel manually.${NC}"
+        exit 1
+    }
+fi
 
 echo -e "\n${GREEN}Creating application user...${NC}"
 useradd -r -s /sbin/nologin -d $INSTALL_DIR $APP_USER 2>/dev/null || true
