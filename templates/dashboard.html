@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Dashboard</h1>
+        <p class="page-lead">{{ dash.myhostname }} · {{ dash.mydomain }}</p>
+    </div>
+    <span class="status-pill {% if dash.postfix_running %}is-up{% else %}is-down{% endif %}">
+        <span class="status-dot"></span>
+        Postfix {{ 'running' if dash.postfix_running else 'stopped' }}
+    </span>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+        <a class="card metric-card metric-link" href="{{ url_for('view_queue') if current_user.role == 'admin' else url_for('index') }}">
+            <div class="card-body">
+                <div class="metric-value">{{ dash.queue.total }}</div>
+                <div class="metric-label">Queue</div>
+                <div class="metric-sub">{{ dash.queue.deferred }} deferred · {{ dash.queue.hold }} hold</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-lg-3">
+        <a class="card metric-card metric-link" href="{{ url_for('sender_routing') }}">
+            <div class="card-body">
+                <div class="metric-value">{{ dash.routing_count }}</div>
+                <div class="metric-label">Sender routes</div>
+                <div class="metric-sub">Mode {{ 'B · relayhost' if dash.routing_mode == 'relayhost' else 'A · transport' }}</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-lg-3">
+        <a class="card metric-card metric-link" href="{{ url_for('transport') }}">
+            <div class="card-body">
+                <div class="metric-value">{{ dash.transport_count }}</div>
+                <div class="metric-label">Transport maps</div>
+                <div class="metric-sub">{{ dash.relay_count }} unique relays</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-lg-3">
+        <a class="card metric-card metric-link" href="{{ url_for('view_stats') }}">
+            <div class="card-body">
+                <div class="metric-value">{{ dash.stats.total }}</div>
+                <div class="metric-label">Delivered 24h</div>
+                <div class="metric-sub">{{ dash.stats.sender_counts|length }} senders</div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header">Quick actions</div>
+            <div class="card-body">
+                <div class="quick-grid">
+                    <a class="quick-tile" href="{{ url_for('sender_routing') }}">Routing</a>
+                    <a class="quick-tile" href="{{ url_for('transport') }}">Transport</a>
+                    <a class="quick-tile" href="{{ url_for('main_config') }}">Configuration</a>
+                    <a class="quick-tile" href="{{ url_for('view_logs') }}">Logs</a>
+                    <a class="quick-tile" href="{{ url_for('view_stats') }}">Statistics</a>
+                    {% if current_user.role == 'admin' %}
+                    <a class="quick-tile" href="{{ url_for('relay_hosts') }}">Relay Hosts</a>
+                    <a class="quick-tile" href="{{ url_for('view_queue') }}">Queue</a>
+                    <a class="quick-tile" href="{{ url_for('list_users') }}">Users</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header">Routing snapshot</div>
+            <div class="card-body">
+                <p class="mb-2 text-muted">Active map</p>
+                <p><code>{{ dash.routing_map }}</code></p>
+                {% if dash.routing_preview %}
+                <p class="mb-2 mt-3 text-muted">First rules</p>
+                <ul class="dash-rules">
+                    {% for entry in dash.routing_preview %}
+                    <li><strong>{{ entry.sender }}</strong> <span class="text-muted">→</span> <code>{{ entry.transport }}</code></li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted mb-0">No sender routing rules yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

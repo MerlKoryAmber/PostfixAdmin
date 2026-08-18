@@ -1,11 +1,34 @@
 {% extends "base.html" %}
 
+{% block title %}Transport Map{% endblock %}
+
 {% block content %}
 <div class="page-header">
     <div><h1 class="page-title">Transport Map</h1></div>
     {% if current_user.role == 'admin' %}
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">Add Entry</button>
     {% endif %}
+</div>
+
+<div class="alert alert-info">
+    <h5>How It Works</h5>
+    <p>Routes mail by <strong>recipient</strong> domain via <code>/etc/postfix/transport</code> (Postfix parameter <code>transport_maps</code>). This is not sender-based routing: From-address rules live in <a href="{{ url_for('sender_routing') }}">Routing</a>.</p>
+    <p class="mb-2">Lookup order: <code>user@domain</code> → <code>domain</code> → <code>.parent.domain</code> (subdomains) → <code>*</code>.</p>
+    <p class="mb-2">Destination format: <code>smtp:[host]:port</code>. Examples:</p>
+    <ul class="mb-2">
+        <li><code>example.com</code> → <code>smtp:[mx.example.com]:25</code> — that domain only</li>
+        <li><code>.example.com</code> → <code>smtp:[mx.example.com]:25</code> — subdomains</li>
+        <li><code>*</code> → <code>smtp:[outbound-relay.example.com]:587</code> — everyone else</li>
+    </ul>
+    <p class="mb-0">
+        <strong>Active <code>transport_maps</code>:</strong>
+        {% if transport_maps %}
+        <code>{{ transport_maps }}</code>
+        {% else %}
+        <span class="badge badge-status-off">not set</span>
+        — Postfix will ignore this file until you set <code>transport_maps = hash:/etc/postfix/transport</code> in <a href="{{ url_for('main_config') }}">Configuration</a> (or <code>postconf</code>) and reload.
+        {% endif %}
+    </p>
 </div>
 
 <div class="card">

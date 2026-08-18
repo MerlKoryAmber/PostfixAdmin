@@ -476,18 +476,42 @@ def save_sender_routing(entries):
         return False, f'Map saved but Postfix reload failed: {err}'
     return True, None
 
+def sender_lookup_keys(sender):
+    """Keys Postfix tries for sender_dependent_* hash maps: user@domain, then @domain."""
+    sender = (sender or '').strip()
+    keys = []
+    if sender:
+        keys.append(sender)
+    if '@' in sender and not sender.startswith('@'):
+        local, domain = sender.rsplit('@', 1)
+        if '+' in local:
+            keys.append(f"{local.split('+', 1)[0]}@{domain}")
+        if domain:
+            keys.append(f'@{domain}')
+    seen = set()
+    ordered = []
+    for key in keys:
+        if key and key not in seen:
+            seen.add(key)
+            ordered.append(key)
+    return ordered
+
 def test_sender_route(sender):
     map_file = get_sender_map_file()
     if not os.path.exists(map_file):
         return False, 'Map file not found'
     try:
-        result = subprocess.run(
-            ['/usr/sbin/postmap', '-q', sender, map_file],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return True, result.stdout.strip()
-        return False, (result.stderr or result.stdout or 'No match found').strip()
+        for key in sender_lookup_keys(sender):
+            result = subprocess.run(
+                ['/usr/sbin/postmap', '-q', key, map_file],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                value = result.stdout.strip()
+                if key != sender:
+                    return True, f'{value} (matched {key})'
+                return True, value
+        return False, 'No match found'
     except Exception as e:
         return False, str(e)
 
@@ -679,18 +703,49 @@ def check_relay_host(host_str):
         return False, 'Invalid hostname'
     if not isinstance(port, int) or port < 1 or port > 65535:
         return False, 'Invalid port'
+    nc = shutil.which('nc') or shutil.which('ncat')
+    timeout_bin = shutil.which('timeout')
     try:
-        with socket.create_connection((host, port), timeout=5) as sock:
-            sock.settimeout(5)
-            sock.sendall(b'QUIT\r\n')
-            response = sock.recv(1024).decode('utf-8', errors='replace')
-        if '220' in response or 'ESMTP' in response:
+        if nc and timeout_bin:
+            result = subprocess.run(
+                [timeout_bin, '4', nc, '-z', '-w', '3', host, str(port)],
+                capture_output=True, text=True, timeout=6
+            )
+            if result.returncode == 0:
+                return True, f'Port {port} is open on {host}'
+            if result.returncode in (124, 137):
+                return False, f'Connection timeout on {host}:{port}'
+            return False, f'Unreachable: {host}:{port}'
+        with socket.create_connection((host, port), timeout=3) as sock:
+            sock.settimeout(3)
+            try:
+                sock.sendall(b'QUIT\r\n')
+                response = sock.recv(1024).decode('utf-8', errors='replace')
+            except OSError:
+                response = ''
+        if '220' in response or 'ESMTP' in response or response == '':
             return True, f'Server responded on port {port}'
         return False, f'No SMTP response on port {port}'
     except socket.timeout:
-        return False, f'Connection timeout on port {port}'
+        return False, f'Connection timeout on {host}:{port}'
+    except socket.gaierror:
+        return False, f'DNS lookup failed for {host}'
     except OSError as e:
         return False, f'Error: {e}'
+    except Exception as e:
+        return False, str(e)
+
+def get_postconf_value(name):
+    try:
+        result = subprocess.run(
+            ['/usr/sbin/postconf', '-h', name],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            return (result.stdout or '').strip()
+    except Exception:
+        pass
+    return ''
 
 # --- Statistics Functions ---
 def parse_mail_logs_for_stats(hours=24):
@@ -735,14 +790,53 @@ def parse_mail_logs_for_stats(hours=24):
 def favicon():
     return send_from_directory(
         os.path.join(app.root_path, 'static'),
-        'favicon-32.png',
-        mimetype='image/png'
+        'favicon.svg',
+        mimetype='image/svg+xml'
     )
 
 @app.route('/')
 @login_required
 def index():
-    return redirect(url_for('main_config'))
+    routing_mode, routing_map = get_sender_routing_mode()
+    entries = parse_sender_transport()
+    queue = {'total': 0, 'active': 0, 'deferred': 0, 'hold': 0}
+    try:
+        result = subprocess.run(['/usr/sbin/postqueue', '-p'], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                entry = parse_queue_line(line)
+                if not entry.get('queue_id'):
+                    continue
+                queue['total'] += 1
+                status = (entry.get('status') or '').lower()
+                if 'active' in status:
+                    queue['active'] += 1
+                elif 'deferred' in status:
+                    queue['deferred'] += 1
+                elif 'hold' in status:
+                    queue['hold'] += 1
+    except Exception:
+        pass
+    postfix_running = False
+    try:
+        st = subprocess.run(['/usr/bin/systemctl', 'is-active', 'postfix'], capture_output=True, text=True, timeout=5)
+        postfix_running = st.stdout.strip() == 'active'
+    except Exception:
+        pass
+    dash = {
+        'postfix_running': postfix_running,
+        'myhostname': get_postconf_value('myhostname') or '—',
+        'mydomain': get_postconf_value('mydomain') or '—',
+        'queue': queue,
+        'routing_mode': routing_mode,
+        'routing_map': routing_map,
+        'routing_count': len(entries),
+        'routing_preview': entries[:6],
+        'transport_count': len(parse_transport()),
+        'relay_count': len(get_relay_hosts()),
+        'stats': parse_mail_logs_for_stats(24),
+    }
+    return render_template('dashboard.html', dash=dash)
 
 @app.route('/login', methods=['GET','POST'])
 def login():
@@ -990,7 +1084,11 @@ def check_config():
 @login_required
 def transport():
     entries = parse_transport()
-    return render_template('transport.html', entries=entries)
+    return render_template(
+        'transport.html',
+        entries=entries,
+        transport_maps=get_postconf_value('transport_maps'),
+    )
 
 @app.route('/transport/add', methods=['POST'])
 @login_required
@@ -1148,7 +1246,8 @@ def test_sender_routing():
 def relay_hosts():
     hosts = get_relay_hosts()
     for host in hosts:
-        host['status'], host['status_msg'] = check_relay_host(host['transport'])
+        host['status'] = None
+        host['status_msg'] = ''
     return render_template('relay_hosts.html', hosts=hosts)
 
 @app.route('/relay-hosts/check', methods=['POST'])
