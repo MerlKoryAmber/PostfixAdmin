@@ -1,22 +1,23 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>Main Configuration</h2>
-    {% if current_user.role == 'admin' %}
+<div class="page-header">
     <div>
-        <a href="{{ url_for('reload_postfix') }}" 
-           class="btn btn-success"
-           onclick="return confirm('Reload Postfix configuration?')">
-            ↻ Reload Postfix
-        </a>
+        <h1 class="page-title">Main Configuration</h1>
     </div>
+    {% if current_user.role == 'admin' %}
+    <form method="POST" action="{{ url_for('reload_postfix') }}" style="display:inline;">
+        {% include '_csrf.html' %}
+        <button type="submit" class="btn btn-outline-secondary"
+                onclick="return confirm('Reload Postfix configuration?')">Reload Postfix</button>
+    </form>
     {% endif %}
 </div>
 
 <div class="row">
     <div class="col-md-8">
         <form method="POST" action="{{ url_for('save_config') }}">
+            {% include '_csrf.html' %}
             <div class="card">
                 <div class="card-header">
                     <h5 class="mb-0">Configuration Parameters</h5>
@@ -64,8 +65,8 @@
                 
                 {% if current_user.role == 'admin' %}
                 <div class="card-footer">
-                    <button type="submit" class="btn btn-primary">💾 Save Changes</button>
-                    <button type="reset" class="btn btn-secondary">↺ Reset</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                    <button type="reset" class="btn btn-outline-secondary">Reset</button>
                 </div>
                 {% endif %}
             </div>
@@ -73,6 +74,27 @@
     </div>
     
     <div class="col-md-4">
+        <div class="card mb-3">
+            <div class="card-header">
+                <h6 class="mb-0">Sender Routing Mode</h6>
+            </div>
+            <div class="card-body small">
+                {% if routing_mode == 'transport' %}
+                <span class="badge badge-status-neutral">Transport maps (A)</span>
+                <p class="mt-2 mb-1">Active parameter: <code>sender_dependent_default_transport_maps</code></p>
+                {% else %}
+                <span class="badge badge-status-ok">Relayhost maps (B)</span>
+                <p class="mt-2 mb-1">Active parameter: <code>sender_dependent_relayhost_maps</code></p>
+                {% endif %}
+                <p class="mb-0 text-muted">Map file: <code>{{ routing_map }}</code></p>
+                <hr>
+                <p class="mb-1"><strong>Switch mode:</strong></p>
+                <ul class="mb-0 ps-3">
+                    <li><strong>Mode B (default):</strong> set relayhost maps, clear transport maps</li>
+                    <li><strong>Mode A:</strong> set transport maps — takes priority if both are set</li>
+                </ul>
+            </div>
+        </div>
         <div class="card mb-3">
             <div class="card-header">
                 <h6 class="mb-0">Postfix Status</h6>
@@ -100,9 +122,9 @@ function checkStatus() {
         .then(response => response.json())
         .then(data => {
             if (data.running) {
-                resultDiv.innerHTML = '<span class="text-success">✅ Postfix is running</span>';
+                resultDiv.innerHTML = '<span class="text-muted">Postfix is running</span>';
             } else {
-                resultDiv.innerHTML = '<span class="text-danger">❌ Postfix is not running</span>';
+                resultDiv.innerHTML = '<span class="text-muted">Postfix is not running</span>';
             }
         });
 }

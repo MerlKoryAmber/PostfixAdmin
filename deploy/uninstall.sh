@@ -13,16 +13,39 @@ fi
 
 INSTALL_DIR="/opt/postfix-admin"
 APP_USER="postfixadmin"
+SENDER_MAP="/etc/postfix/sender_transport"
+SASL_PASSWD="/etc/postfix/sender_sasl_passwd"
 
 echo -e "${YELLOW}=========================================${NC}"
 echo -e "${YELLOW}Postfix Admin Uninstall${NC}"
 echo -e "${YELLOW}=========================================${NC}"
 echo ""
+echo -e "${YELLOW}The following Postfix files will be preserved:${NC}"
+echo "  - $SENDER_MAP"
+echo "  - ${SENDER_MAP}.db"
+echo "  - $SASL_PASSWD"
+echo "  - ${SASL_PASSWD}.db"
+echo "  - /etc/postfix/main.cf"
+echo ""
 
-read -p "This will completely remove Postfix Admin web interface. Continue? (y/N): " CONFIRM
+read -p "Remove Postfix Admin web interface only? (y/N): " CONFIRM
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
     echo "Aborted."
     exit 0
+fi
+
+read -p "Also remove empty panel-created map files if unused? (y/N): " REMOVE_MAPS
+if [[ "$REMOVE_MAPS" =~ ^[Yy]$ ]]; then
+    for f in "$SENDER_MAP" "$SASL_PASSWD"; do
+        if [ -f "$f" ] && grep -q "Managed via web interface" "$f" 2>/dev/null; then
+            if [ "$(grep -cve '^[[:space:]]*$' -e '^#' "$f")" -eq 0 ]; then
+                echo -e "${YELLOW}Removing empty map: $f${NC}"
+                rm -f "$f" "${f}.db" "${f}.bak"
+            else
+                echo -e "${YELLOW}Keeping non-empty map: $f${NC}"
+            fi
+        fi
+    done
 fi
 
 echo -e "\n${GREEN}Stopping and disabling postfix-admin service...${NC}"
@@ -38,6 +61,12 @@ rm -rf "$INSTALL_DIR"
 
 echo -e "\n${GREEN}Removing Nginx configuration...${NC}"
 rm -f /etc/nginx/conf.d/postfix-admin.conf
+if nginx -t 2>/dev/null; then
+    systemctl reload nginx 2>/dev/null || true
+    echo -e "${GREEN}Nginx reloaded.${NC}"
+else
+    echo -e "${YELLOW}Nginx config test failed — reload skipped.${NC}"
+fi
 
 echo -e "\n${GREEN}Removing SSL certificate...${NC}"
 rm -f /etc/nginx/ssl/postfix-admin.crt
@@ -55,5 +84,5 @@ echo -e "\n${GREEN}=========================================${NC}"
 echo -e "${GREEN}Uninstall complete.${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo ""
-echo -e "${YELLOW}Note: Postfix and Nginx packages were not removed.${NC}"
-echo "To reload Nginx configuration changes, run: systemctl reload nginx"
+echo -e "${YELLOW}Postfix configuration and routing maps were kept (unless you opted to remove empty maps).${NC}"
+echo -e "${YELLOW}Postfix and Nginx packages were not removed.${NC}"

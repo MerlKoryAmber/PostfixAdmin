@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>User Management</h2>
-    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addUserModal">+ Add User</button>
+<div class="page-header">
+    <div><h1 class="page-title">User Management</h1></div>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addUserModal">Add User</button>
 </div>
 
 <div class="card">
@@ -22,12 +22,13 @@
                     {% for username, data in users.items() %}
                     <tr>
                         <td>{{ username }}</td>
-                        <td><span class="badge bg-{{ 'danger' if data.role == 'admin' else 'info' }}">{{ data.role }}</span></td>
+                        <td><span class="badge badge-status-{{ 'ok' if data.role == 'admin' else 'neutral' }}">{{ data.role }}</span></td>
                         <td>{{ data.get('created', 'N/A')[:10] }}</td>
                         <td>
-                            <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#resetModal{{ username }}">Reset Password</button>
+                            <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#resetModal{{ username }}">Reset Password</button>
                             <form method="POST" action="{{ url_for('delete_user', username=username) }}" style="display:inline;">
-                                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete user {{ username }}?')">Delete</button>
+                                {% include '_csrf.html' %}
+                                <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete user {{ username }}?')">Delete</button>
                             </form>
                         </td>
                     </tr>
@@ -40,6 +41,7 @@
                                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                 </div>
                                 <form method="POST" action="{{ url_for('admin_reset_password', username=username) }}">
+                                    {% include '_csrf.html' %}
                                     <div class="modal-body">
                                         <div class="mb-3">
                                             <label class="form-label">New Password</label>
@@ -70,6 +72,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form method="POST" action="{{ url_for('add_user') }}">
+                {% include '_csrf.html' %}
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label">Username</label>

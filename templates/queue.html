@@ -1,95 +1,98 @@
 {% extends "base.html" %}
 
+{% block title %}Mail Queue{% endblock %}
+
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>📬 Mail Queue</h2>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Mail Queue</h1>
+    </div>
     {% if current_user.role == 'admin' %}
-    <div class="btn-group">
-        <a href="{{ url_for('flush_queue') }}" 
-           class="btn btn-success btn-sm"
-           onclick="return confirm('Flush entire queue?')">
-            🔄 Flush All
-        </a>
-        <a href="{{ url_for('delete_all_queue') }}" 
-           class="btn btn-warning btn-sm"
-           onclick="return confirm('Delete ALL messages? Active deliveries preserved.')">
-            🗑️ Delete All
-        </a>
-        <a href="{{ url_for('delete_deferred') }}" 
-           class="btn btn-danger btn-sm"
-           onclick="return confirm('Delete all deferred messages?')">
-            ⚠️ Delete Deferred
-        </a>
+    <div class="d-flex flex-wrap gap-2">
+        <form method="POST" action="{{ url_for('flush_queue') }}" style="display:inline;">
+            {% include '_csrf.html' %}
+            <button type="submit" class="btn btn-outline-secondary btn-sm"
+                    onclick="return confirm('Flush entire queue?')">Flush All</button>
+        </form>
+        <form method="POST" action="{{ url_for('delete_all_queue') }}" style="display:inline;">
+            {% include '_csrf.html' %}
+            <button type="submit" class="btn btn-outline-danger btn-sm"
+                    onclick="return confirm('Delete ALL messages? Active deliveries preserved.')">Delete All</button>
+        </form>
+        <form method="POST" action="{{ url_for('delete_deferred') }}" style="display:inline;">
+            {% include '_csrf.html' %}
+            <button type="submit" class="btn btn-outline-danger btn-sm"
+                    onclick="return confirm('Delete all deferred messages?')">Delete Deferred</button>
+        </form>
     </div>
     {% endif %}
 </div>
 
-<!-- Статистика -->
-<div class="row mb-3">
+<div class="row mb-4 g-3">
     <div class="col-md-3">
-        <div class="card bg-primary text-white">
+        <div class="card metric-card">
             <div class="card-body text-center">
-                <h5 class="mb-0">{{ stats.total }}</h5>
-                <small>Total</small>
+                <div class="metric-value">{{ stats.total }}</div>
+                <div class="metric-label">Total</div>
             </div>
         </div>
     </div>
     <div class="col-md-3">
-        <div class="card bg-info text-white">
+        <div class="card metric-card">
             <div class="card-body text-center">
-                <h5 class="mb-0">{{ stats.active }}</h5>
-                <small>Active</small>
+                <div class="metric-value">{{ stats.active }}</div>
+                <div class="metric-label">Active</div>
             </div>
         </div>
     </div>
     <div class="col-md-3">
-        <div class="card bg-warning">
+        <div class="card metric-card">
             <div class="card-body text-center">
-                <h5 class="mb-0">{{ stats.deferred }}</h5>
-                <small>Deferred</small>
+                <div class="metric-value">{{ stats.deferred }}</div>
+                <div class="metric-label">Deferred</div>
             </div>
         </div>
     </div>
     <div class="col-md-3">
-        <div class="card bg-secondary text-white">
+        <div class="card metric-card">
             <div class="card-body text-center">
-                <h5 class="mb-0">{{ stats.hold }}</h5>
-                <small>On Hold</small>
+                <div class="metric-value">{{ stats.hold }}</div>
+                <div class="metric-label">On Hold</div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Массовые операции -->
 {% if current_user.role == 'admin' and entries|length > 0 %}
-<div class="card mb-3">
+<div class="card mb-4">
+    <div class="card-header">Bulk Operations</div>
     <div class="card-body">
-        <div class="row">
+        <div class="row g-3">
             <div class="col-md-6">
-                <form method="POST" action="{{ url_for('delete_by_sender') }}" class="row g-2">
-                    <div class="col-auto">
-                        <input type="text" name="sender" class="form-control form-control-sm" 
+                <form method="POST" action="{{ url_for('delete_by_sender') }}" class="row g-2 align-items-end">
+                    {% include '_csrf.html' %}
+                    <div class="col">
+                        <label class="form-label">Delete by sender</label>
+                        <input type="text" name="sender" class="form-control form-control-sm"
                                placeholder="sender@domain.com" required>
                     </div>
                     <div class="col-auto">
-                        <button type="submit" class="btn btn-danger btn-sm"
-                                onclick="return confirm('Delete all messages from this sender?')">
-                            Delete by Sender
-                        </button>
+                        <button type="submit" class="btn btn-outline-danger btn-sm"
+                                onclick="return confirm('Delete all messages from this sender?')">Delete</button>
                     </div>
                 </form>
             </div>
             <div class="col-md-6">
-                <form method="POST" action="{{ url_for('delete_by_domain') }}" class="row g-2">
-                    <div class="col-auto">
-                        <input type="text" name="domain" class="form-control form-control-sm" 
+                <form method="POST" action="{{ url_for('delete_by_domain') }}" class="row g-2 align-items-end">
+                    {% include '_csrf.html' %}
+                    <div class="col">
+                        <label class="form-label">Delete by domain</label>
+                        <input type="text" name="domain" class="form-control form-control-sm"
                                placeholder="domain.com" required>
                     </div>
                     <div class="col-auto">
-                        <button type="submit" class="btn btn-danger btn-sm"
-                                onclick="return confirm('Delete all messages for this domain?')">
-                            Delete by Domain
-                        </button>
+                        <button type="submit" class="btn btn-outline-danger btn-sm"
+                                onclick="return confirm('Delete all messages for this domain?')">Delete</button>
                     </div>
                 </form>
             </div>
@@ -98,15 +101,14 @@
 </div>
 {% endif %}
 
-<!-- Таблица очереди -->
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span>Messages in queue</span>
-        <small>Total: {{ entries|length }}</small>
+        <small class="text-muted">Total: {{ entries|length }}</small>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover table-striped mb-0">
+            <table class="table table-hover mb-0">
                 <thead>
                     <tr>
                         <th>ID</th>
@@ -124,9 +126,8 @@
                     {% for entry in entries %}
                     <tr>
                         <td>
-                            <a href="{{ url_for('view_message_detail', queue_id=entry.queue_id) }}" 
-                               title="View details">
-                                <code>{{ entry.queue_id[:8] }}...</code>
+                            <a href="{{ url_for('view_message_detail', queue_id=entry.queue_id) }}">
+                                <code>{{ entry.queue_id[:8] }}…</code>
                             </a>
                         </td>
                         <td>{{ entry.size }}</td>
@@ -135,42 +136,48 @@
                         <td><small>{{ entry.recipient }}</small></td>
                         <td>
                             {% if 'active' in entry.status.lower() %}
-                                <span class="badge bg-info">active</span>
+                                <span class="badge badge-status-ok">active</span>
                             {% elif 'deferred' in entry.status.lower() %}
-                                <span class="badge bg-warning">deferred</span>
+                                <span class="badge badge-status-neutral">deferred</span>
                             {% elif 'hold' in entry.status.lower() %}
-                                <span class="badge bg-secondary">hold</span>
+                                <span class="badge badge-status-off">hold</span>
                             {% else %}
                                 <small>{{ entry.status }}</small>
                             {% endif %}
                         </td>
                         {% if current_user.role == 'admin' %}
                         <td>
-                            <div class="btn-group btn-group-sm">
-                                <a href="{{ url_for('view_message_detail', queue_id=entry.queue_id) }}" 
-                                   class="btn btn-outline-primary btn-sm" title="View">👁️</a>
-                                <a href="{{ url_for('requeue_message', queue_id=entry.queue_id) }}" 
-                                   class="btn btn-outline-success btn-sm" title="Requeue">🔄</a>
+                            <div class="d-flex flex-wrap gap-1">
+                                <a href="{{ url_for('view_message_detail', queue_id=entry.queue_id) }}"
+                                   class="btn btn-outline-secondary btn-sm">View</a>
+                                <form method="POST" action="{{ url_for('requeue_message', queue_id=entry.queue_id) }}" style="display:inline;">
+                                    {% include '_csrf.html' %}
+                                    <button type="submit" class="btn btn-outline-secondary btn-sm">Requeue</button>
+                                </form>
                                 {% if 'hold' in entry.status.lower() %}
-                                <a href="{{ url_for('release_message', queue_id=entry.queue_id) }}" 
-                                   class="btn btn-outline-info btn-sm" title="Release">▶️</a>
+                                <form method="POST" action="{{ url_for('release_message', queue_id=entry.queue_id) }}" style="display:inline;">
+                                    {% include '_csrf.html' %}
+                                    <button type="submit" class="btn btn-outline-secondary btn-sm">Release</button>
+                                </form>
                                 {% else %}
-                                <a href="{{ url_for('hold_message', queue_id=entry.queue_id) }}" 
-                                   class="btn btn-outline-secondary btn-sm" title="Hold">⏸️</a>
+                                <form method="POST" action="{{ url_for('hold_message', queue_id=entry.queue_id) }}" style="display:inline;">
+                                    {% include '_csrf.html' %}
+                                    <button type="submit" class="btn btn-outline-secondary btn-sm">Hold</button>
+                                </form>
                                 {% endif %}
-                                <a href="{{ url_for('delete_queue_message', queue_id=entry.queue_id) }}" 
-                                   class="btn btn-outline-danger btn-sm" 
-                                   onclick="return confirm('Delete {{ entry.queue_id }}?')" title="Delete">🗑️</a>
+                                <form method="POST" action="{{ url_for('delete_queue_message', queue_id=entry.queue_id) }}" style="display:inline;">
+                                    {% include '_csrf.html' %}
+                                    <button type="submit" class="btn btn-outline-danger btn-sm"
+                                            onclick="return confirm('Delete {{ entry.queue_id }}?')">Delete</button>
+                                </form>
                             </div>
                         </td>
                         {% endif %}
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="{% if current_user.role == 'admin' %}7{% else %}6{% endif %}" 
-                            class="text-center text-muted py-4">
-                            ✅ Mail queue is empty
-                        </td>
+                        <td colspan="{% if current_user.role == 'admin' %}7{% else %}6{% endif %}"
+                            class="text-center text-muted py-5">Mail queue is empty</td>
                     </tr>
                     {% endfor %}
                 </tbody>

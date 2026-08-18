@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Mail Server Logs</h2>
+<h2 class="page-title mb-4">Mail Server Logs</h2>
 
 <!-- Фильтры -->
 <div class="card mb-3">
@@ -57,7 +57,7 @@
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover table-striped mb-0">
-                <thead class="table-dark">
+                <thead>
                     <tr>
                         <th style="width: 120px;">Time</th>
                         <th style="width: 180px;">From</th>
@@ -75,11 +75,11 @@
                         <td><small>{{ log.to }}</small></td>
                         <td>
                             {% if 'sent' in log.status %}
-                                <span class="badge bg-success">{{ log.status }}</span>
+                                <span class="badge badge-status-ok">{{ log.status }}</span>
                             {% elif 'deferred' in log.status %}
-                                <span class="badge bg-warning text-dark">{{ log.status }}</span>
+                                <span class="badge badge-status-neutral">{{ log.status }}</span>
                             {% elif 'bounced' in log.status or 'error' in log.status %}
-                                <span class="badge bg-danger">{{ log.status }}</span>
+                                <span class="badge badge-status-off">{{ log.status }}</span>
                             {% else %}
                                 <small>{{ log.status }}</small>
                             {% endif %}

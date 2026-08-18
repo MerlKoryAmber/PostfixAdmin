@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="InterROS">
+  <rect width="32" height="32" fill="#0096aa"/>
+  <rect x="9" y="7" width="2.5" height="18" fill="#ffffff"/>
+  <rect x="14.5" y="7" width="8.5" height="2.5" fill="#ffffff"/>
+  <rect x="14.5" y="14.75" width="6.5" height="2.5" fill="#ffffff"/>
+</svg>

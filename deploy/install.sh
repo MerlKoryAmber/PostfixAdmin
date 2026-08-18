@@ -16,6 +16,90 @@ INSTALL_DIR="/opt/postfix-admin"
 APP_USER="postfixadmin"
 APP_GROUP="postfixadmin"
 WHEEL_FILE="$(dirname "$0")/Flask_Login-0.6.3-py3-none-any.whl"
+SENDER_MAP="/etc/postfix/sender_transport"
+SASL_PASSWD="/etc/postfix/sender_sasl_passwd"
+MAIN_CF="/etc/postfix/main.cf"
+
+detect_postfix_routing() {
+    ROUTING_MODE="unknown"
+    ROUTING_MAP=""
+    RELAYHOST_MAPS=""
+    TRANSPORT_MAPS=""
+    SASL_AUTH=""
+    SASL_MAPS=""
+
+    if ! command -v postconf >/dev/null 2>&1; then
+        return 1
+    fi
+
+    RELAYHOST_MAPS=$(postconf -h sender_dependent_relayhost_maps 2>/dev/null || true)
+    TRANSPORT_MAPS=$(postconf -h sender_dependent_default_transport_maps 2>/dev/null || true)
+    SASL_AUTH=$(postconf -h smtp_sender_dependent_authentication 2>/dev/null || true)
+    SASL_MAPS=$(postconf -h smtp_sasl_password_maps 2>/dev/null || true)
+
+    if [ -n "$TRANSPORT_MAPS" ]; then
+        ROUTING_MODE="transport"
+        ROUTING_MAP="${TRANSPORT_MAPS#hash:}"
+        ROUTING_MAP="${ROUTING_MAP#texthash:}"
+    elif [ -n "$RELAYHOST_MAPS" ]; then
+        ROUTING_MODE="relayhost"
+        ROUTING_MAP="${RELAYHOST_MAPS#hash:}"
+        ROUTING_MAP="${ROUTING_MAP#texthash:}"
+    else
+        ROUTING_MODE="relayhost"
+        ROUTING_MAP="$SENDER_MAP"
+    fi
+    return 0
+}
+
+ensure_sender_map_file() {
+    local file="$1"
+    local mode="$2"
+    if [ -f "$file" ]; then
+        echo -e "${GREEN}Found existing map: ${file}${NC}"
+        return 0
+    fi
+    echo -e "${YELLOW}Creating empty map: ${file}${NC}"
+    cat > "$file" << EOF
+# Postfix sender-dependent routing map
+# Mode: ${mode}
+# Managed via web interface
+
+EOF
+    chmod 644 "$file"
+    postmap "$file"
+}
+
+print_routing_summary() {
+    echo -e "\n${BLUE}=========================================${NC}"
+    echo -e "${BLUE}Postfix sender routing (existing config)${NC}"
+    echo -e "${BLUE}=========================================${NC}"
+
+    if ! detect_postfix_routing; then
+        echo -e "${YELLOW}postconf not found — Postfix routing was not inspected.${NC}"
+        return
+    fi
+
+    echo -e "Detected mode: ${YELLOW}${ROUTING_MODE}${NC}"
+    echo -e "Map file:      ${YELLOW}${ROUTING_MAP}${NC}"
+    [ -n "$RELAYHOST_MAPS" ] && echo -e "relayhost maps: ${RELAYHOST_MAPS}"
+    [ -n "$TRANSPORT_MAPS" ] && echo -e "transport maps: ${TRANSPORT_MAPS}"
+    [ -n "$SASL_AUTH" ] && echo -e "sender SASL:    ${SASL_AUTH}"
+    [ -n "$SASL_MAPS" ] && echo -e "SASL maps:      ${SASL_MAPS}"
+
+    if [ -z "$RELAYHOST_MAPS" ] && [ -z "$TRANSPORT_MAPS" ]; then
+        echo -e "${YELLOW}No sender routing parameter found in main.cf.${NC}"
+        echo -e "Suggested Mode B (relayhost):"
+        echo -e "  sender_dependent_relayhost_maps = hash:${SENDER_MAP}"
+        echo -e "Configure via web panel → Configuration, then: postfix reload"
+    fi
+
+    if [ "$ROUTING_MODE" = "relayhost" ] && [ "$SASL_AUTH" != "yes" ]; then
+        echo -e "${YELLOW}For per-sender SASL in relayhost mode also set:${NC}"
+        echo -e "  smtp_sender_dependent_authentication = yes"
+        echo -e "  smtp_sasl_password_maps = hash:${SASL_PASSWD}"
+    fi
+}
 
 echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}Postfix Admin Installation${NC}"
@@ -23,7 +107,11 @@ echo -e "${BLUE}=========================================${NC}"
 
 echo -e "\n${GREEN}Installing system dependencies...${NC}"
 dnf install -y epel-release
-dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl
+dnf install -y python3 python3-pip python3-flask python3-gunicorn postfix nginx openssl nmap-ncat
+
+if ! systemctl is-active --quiet postfix 2>/dev/null; then
+    echo -e "${YELLOW}Warning: Postfix service is not running. Start it after configuration.${NC}"
+fi
 
 echo -e "\n${GREEN}Installing Flask-Login...${NC}"
 if [ -f "$WHEEL_FILE" ]; then
@@ -36,6 +124,12 @@ else
     }
 fi
 
+echo -e "\n${GREEN}Installing Flask-WTF (CSRF)...${NC}"
+pip3 install flask-wtf || {
+    echo -e "${RED}Failed to install Flask-WTF.${NC}"
+    exit 1
+}
+
 echo -e "\n${GREEN}Creating application user...${NC}"
 useradd -r -s /sbin/nologin -d $INSTALL_DIR $APP_USER 2>/dev/null || true
 
@@ -46,6 +140,19 @@ cp -r templates/* $INSTALL_DIR/templates/
 cp -r static/* $INSTALL_DIR/static/
 cp deploy/nginx-https.conf $INSTALL_DIR/deploy/
 cp deploy/postfix-admin.service $INSTALL_DIR/deploy/
+cp deploy/install.sh $INSTALL_DIR/deploy/
+cp deploy/uninstall.sh $INSTALL_DIR/deploy/
+cp deploy/update.sh $INSTALL_DIR/deploy/ 2>/dev/null || true
+
+echo -e "\n${GREEN}Checking Postfix sender routing files...${NC}"
+detect_postfix_routing || true
+MAP_TO_ENSURE="${ROUTING_MAP:-$SENDER_MAP}"
+ensure_sender_map_file "$MAP_TO_ENSURE" "${ROUTING_MODE:-relayhost}"
+ensure_sender_map_file "$SASL_PASSWD" "sasl"
+if [ -f "$SASL_PASSWD" ]; then
+    chmod 600 "$SASL_PASSWD"
+fi
+print_routing_summary
 
 echo -e "\n${GREEN}Generating self-signed SSL certificate...${NC}"
 mkdir -p /etc/nginx/ssl
@@ -99,11 +206,19 @@ chown -R $APP_USER:$APP_GROUP $INSTALL_DIR
 
 echo "{}" > $INSTALL_DIR/users.json
 chown $APP_USER:$APP_GROUP $INSTALL_DIR/users.json
-chmod 640 $INSTALL_DIR/users.json
+chmod 600 $INSTALL_DIR/users.json
 
 echo "[]" > $INSTALL_DIR/ip_whitelist.json
 chown $APP_USER:$APP_GROUP $INSTALL_DIR/ip_whitelist.json
 chmod 640 $INSTALL_DIR/ip_whitelist.json
+
+echo -e "\n${GREEN}Generating nginx IP allow config...${NC}"
+cat > $INSTALL_DIR/nginx-allow.conf << 'EOF'
+# Generated by Postfix Admin — do not edit manually
+allow all;
+EOF
+chmod 644 $INSTALL_DIR/nginx-allow.conf
+chown $APP_USER:$APP_GROUP $INSTALL_DIR/nginx-allow.conf
 
 echo -e "\n${GREEN}Configuring log file access...${NC}"
 if getent group adm > /dev/null; then
@@ -175,3 +290,5 @@ echo -e "\n${GREEN}=========================================${NC}"
 echo -e "${GREEN}Installation complete!${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo -e "Access: ${YELLOW}https://$(hostname -I | awk '{print $1}')${NC}"
+echo -e "Sender routing map: ${YELLOW}${ROUTING_MAP:-$SENDER_MAP}${NC}"
+echo -e "Panel reads existing ${YELLOW}main.cf${NC} — map files are not overwritten if already present."

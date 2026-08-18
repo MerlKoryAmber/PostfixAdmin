@@ -1,12 +1,10 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>Transport Map</h2>
+<div class="page-header">
+    <div><h1 class="page-title">Transport Map</h1></div>
     {% if current_user.role == 'admin' %}
-    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
-        + Add Entry
-    </button>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">Add Entry</button>
     {% endif %}
 </div>
 
@@ -30,11 +28,12 @@
                         <td>{{ entry.destination }}</td>
                         {% if current_user.role == 'admin' %}
                         <td>
-                            <a href="{{ url_for('delete_transport', domain=entry.domain) }}" 
-                               class="btn btn-danger btn-sm"
-                               onclick="return confirm('Delete transport for {{ entry.domain }}?')">
-                                Delete
-                            </a>
+                            <form method="POST" action="{{ url_for('delete_transport') }}" style="display:inline;"
+                                  onsubmit="return confirm('Delete transport for {{ entry.domain }}?')">
+                                {% include '_csrf.html' %}
+                                <input type="hidden" name="domain" value="{{ entry.domain }}">
+                                <button type="submit" class="btn btn-outline-danger btn-sm">Delete</button>
+                            </form>
                         </td>
                         {% endif %}
                     </tr>
@@ -57,9 +56,10 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Add Transport Entry</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form method="POST" action="{{ url_for('add_transport') }}">
+                {% include '_csrf.html' %}
                 <div class="modal-body">
                     <div class="mb-3">
                         <label for="domain" class="form-label">Domain</label>

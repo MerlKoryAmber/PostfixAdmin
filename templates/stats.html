@@ -1,8 +1,12 @@
 {% extends "base.html" %}
 
+{% block title %}Statistics{% endblock %}
+
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>📊 Routing Statistics</h2>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Routing Statistics</h1>
+    </div>
     <div class="btn-group">
         <a href="?hours=1" class="btn btn-sm btn-outline-secondary {% if hours==1 %}active{% endif %}">1h</a>
         <a href="?hours=6" class="btn btn-sm btn-outline-secondary {% if hours==6 %}active{% endif %}">6h</a>
@@ -13,41 +17,37 @@
     </div>
 </div>
 
-<!-- Общая информация -->
-<div class="row mb-4">
+<div class="row mb-4 g-3">
     <div class="col-md-4">
-        <div class="card bg-primary text-white">
+        <div class="card metric-card">
             <div class="card-body text-center">
-                <h5 class="mb-0">{{ stats.total }}</h5>
-                <small>Total Messages Delivered ({{ hours }}h)</small>
+                <div class="metric-value">{{ stats.total }}</div>
+                <div class="metric-label">Messages delivered ({{ hours }}h)</div>
             </div>
         </div>
     </div>
     <div class="col-md-4">
-        <div class="card bg-success text-white">
+        <div class="card metric-card">
             <div class="card-body text-center">
-                <h5 class="mb-0">{{ stats.relay_counts|length }}</h5>
-                <small>Relay Hosts Used</small>
+                <div class="metric-value">{{ stats.relay_counts|length }}</div>
+                <div class="metric-label">Relay hosts used</div>
             </div>
         </div>
     </div>
     <div class="col-md-4">
-        <div class="card bg-info text-white">
+        <div class="card metric-card">
             <div class="card-body text-center">
-                <h5 class="mb-0">{{ stats.sender_counts|length }}</h5>
-                <small>Unique Senders</small>
+                <div class="metric-value">{{ stats.sender_counts|length }}</div>
+                <div class="metric-label">Unique senders</div>
             </div>
         </div>
     </div>
 </div>
 
-<div class="row">
-    <!-- Топ отправителей -->
+<div class="row g-4">
     <div class="col-md-6">
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0">Top Senders</h5>
-            </div>
+        <div class="card">
+            <div class="card-header">Top Senders</div>
             <div class="card-body p-0">
                 <table class="table table-striped mb-0">
                     <thead>
@@ -64,7 +64,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="2" class="text-center text-muted">No data</td>
+                            <td colspan="2" class="text-center text-muted py-4">No data</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -72,13 +72,9 @@
             </div>
         </div>
     </div>
-
-    <!-- Топ релей-хостов -->
     <div class="col-md-6">
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0">Top Relay Hosts</h5>
-            </div>
+        <div class="card">
+            <div class="card-header">Top Relay Hosts</div>
             <div class="card-body p-0">
                 <table class="table table-striped mb-0">
                     <thead>
@@ -95,7 +91,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="2" class="text-center text-muted">No data</td>
+                            <td colspan="2" class="text-center text-muted py-4">No data</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -105,11 +101,8 @@
     </div>
 </div>
 
-<!-- Почасовая нагрузка (простая таблица с индикаторами) -->
-<div class="card">
-    <div class="card-header">
-        <h5 class="mb-0">Hourly Load (last {{ hours }}h)</h5>
-    </div>
+<div class="card mt-4">
+    <div class="card-header">Hourly Load (last {{ hours }}h)</div>
     <div class="card-body p-0">
         <table class="table table-striped mb-0">
             <thead>
@@ -126,9 +119,9 @@
                     <td>{{ hour }}</td>
                     <td><strong>{{ count }}</strong></td>
                     <td>
-                        <div class="progress" style="height: 20px;">
-                            <div class="progress-bar bg-info" role="progressbar" 
-                                 style="width: {{ (count / max_count * 100)|int }}%;" 
+                        <div class="progress" style="height: 18px;">
+                            <div class="progress-bar" role="progressbar"
+                                 style="width: {{ (count / max_count * 100)|int }}%;"
                                  aria-valuenow="{{ count }}" aria-valuemin="0" aria-valuemax="{{ max_count }}">
                                 {{ (count / max_count * 100)|int }}%
                             </div>
@@ -137,7 +130,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="3" class="text-center text-muted">No data</td>
+                    <td colspan="3" class="text-center text-muted py-4">No data</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -148,9 +141,6 @@
 
 {% block scripts %}
 <script>
-// Автообновление (опционально)
-setTimeout(function() {
-    location.reload();
-}, 60000);
+setTimeout(function() { location.reload(); }, 60000);
 </script>
 {% endblock %}

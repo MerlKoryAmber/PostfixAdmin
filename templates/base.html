@@ -1,101 +1,110 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Postfix Admin - Mail Server Management</title>
+    <title>{% block title %}Postfix Admin{% endblock %} — InterROS</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon-32.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='bootstrap.min.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="/">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
-                </svg>
-                <span>Postfix Admin</span>
-            </a>
-            {% if current_user.is_authenticated %}
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'main_config' %}active{% endif %}" 
-                           href="{{ url_for('main_config') }}">⚙️ Configuration</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'transport' %}active{% endif %}" 
-                           href="{{ url_for('transport') }}">📋 Transport</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'sender_routing' %}active{% endif %}" 
-                           href="{{ url_for('sender_routing') }}">🚀 Routing</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'relay_hosts' %}active{% endif %}" 
-                           href="{{ url_for('relay_hosts') }}">🖥️ Relay Hosts</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'view_queue' %}active{% endif %}" 
-                           href="{{ url_for('view_queue') }}">📬 Queue</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'view_stats' %}active{% endif %}" 
-                           href="{{ url_for('view_stats') }}">📊 Stats</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'view_logs' %}active{% endif %}" 
-                           href="{{ url_for('view_logs') }}">📊 Logs</a>
-                    </li>
-                    {% if current_user.role == 'admin' %}
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="adminMenu" role="button" data-bs-toggle="dropdown">
-                            🔧 Admin
-                        </a>
-                        <ul class="dropdown-menu">
-                            <li><a class="dropdown-item" href="{{ url_for('list_users') }}">👥 Users</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('ip_whitelist') }}">🛡️ IP Whitelist</a></li>
-                        </ul>
-                    </li>
-                    {% endif %}
-                </ul>
-                <ul class="navbar-nav">
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="userMenu" role="button" data-bs-toggle="dropdown">
-                            👤 {{ current_user.id }}
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="{{ url_for('profile') }}">🔑 Change Password</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">🚪 Logout</a></li>
-                        </ul>
-                    </li>
-                </ul>
+    <header class="site-header">
+        <nav class="navbar navbar-expand-lg">
+            <div class="container-fluid page-container py-0">
+                <a class="navbar-brand" href="{{ url_for('index') if current_user.is_authenticated else url_for('login') }}">
+                    <span class="brand-mark" aria-hidden="true"></span>
+                    <span>
+                        InterROS
+                        <span class="brand-sub d-none d-md-inline">Postfix Admin</span>
+                    </span>
+                </a>
+                {% if current_user.is_authenticated %}
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
+                        aria-controls="navbarNav" aria-expanded="false" aria-label="Menu">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav me-auto ms-lg-4">
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'main_config' %}active{% endif %}"
+                               href="{{ url_for('main_config') }}">Configuration</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'transport' %}active{% endif %}"
+                               href="{{ url_for('transport') }}">Transport</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'sender_routing' %}active{% endif %}"
+                               href="{{ url_for('sender_routing') }}">Routing</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'relay_hosts' %}active{% endif %}"
+                               href="{{ url_for('relay_hosts') }}">Relay Hosts</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'view_queue' %}active{% endif %}"
+                               href="{{ url_for('view_queue') }}">Queue</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'view_stats' %}active{% endif %}"
+                               href="{{ url_for('view_stats') }}">Statistics</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'view_logs' %}active{% endif %}"
+                               href="{{ url_for('view_logs') }}">Logs</a>
+                        </li>
+                        {% if current_user.role == 'admin' %}
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" id="adminMenu" role="button"
+                               data-bs-toggle="dropdown" aria-expanded="false">Administration</a>
+                            <ul class="dropdown-menu" aria-labelledby="adminMenu">
+                                <li><a class="dropdown-item" href="{{ url_for('list_users') }}">Users</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('ip_whitelist') }}">IP Whitelist</a></li>
+                            </ul>
+                        </li>
+                        {% endif %}
+                    </ul>
+                    <ul class="navbar-nav">
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" id="userMenu" role="button"
+                               data-bs-toggle="dropdown" aria-expanded="false">{{ current_user.id }}</a>
+                            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userMenu">
+                                <li><a class="dropdown-item" href="{{ url_for('profile') }}">Change Password</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="{{ url_for('logout') }}">Sign Out</a></li>
+                            </ul>
+                        </li>
+                    </ul>
+                </div>
+                {% endif %}
             </div>
-            {% endif %}
-        </div>
-    </nav>
+        </nav>
+    </header>
 
-    <div class="container mt-4 flex-grow-1">
+    <main class="page-container">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                <div class="alert alert-{{ category }} alert-dismissible fade show mb-4" role="alert">
                     {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                 </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
 
         {% block content %}{% endblock %}
-    </div>
+    </main>
 
-    <footer class="text-center">
-        <small>&copy; {{ current_year }} Postfix Admin. All rights reserved.</small>
+    <footer class="site-footer">
+        <div class="page-container py-0 text-center">
+            <span class="footer-brand">InterROS</span>
+            <span class="mx-2">·</span>
+            <small>Postfix Administration Panel · &copy; {{ current_year }}</small>
+        </div>
     </footer>
 
     <script src="{{ url_for('static', filename='bootstrap.bundle.min.js') }}"></script>

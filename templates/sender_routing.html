@@ -1,18 +1,45 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>Sender-Dependent Routing</h2>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Sender-Dependent Routing</h1>
+    </div>
     {% if current_user.role == 'admin' %}
-    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
-        + Add Rule
-    </button>
+    <button class="btn btn-primary" onclick="openRuleModal('add')">Add Rule</button>
     {% endif %}
 </div>
 
 <div class="alert alert-info">
     <h5>How It Works</h5>
-    <p>Sender-dependent routing allows directing mail through different SMTP servers based on the sender address.</p>
+    <p>Directs mail through different SMTP servers based on the sender address. Mode is read from <code>main.cf</code>.</p>
+    <p class="mb-0">
+        <strong>Active mode:</strong>
+        {% if routing_mode == 'relayhost' %}
+        <span class="badge badge-status-ok">Relayhost (B)</span> — values saved as <code>[host]:port</code>
+        {% else %}
+        <span class="badge badge-status-neutral">Transport (A)</span> — values saved as <code>smtp:[host]:port</code> with per-route options
+        {% endif %}
+        <br><small class="text-muted">Map file: <code>{{ routing_map }}</code> — change mode in <a href="{{ url_for('main_config') }}">Configuration</a></small>
+    </p>
+    {% if routing_mode == 'relayhost' %}
+    <p class="mb-0 mt-2"><small>For per-sender SASL set <code>smtp_sender_dependent_authentication = yes</code> and <code>smtp_sasl_password_maps = hash:/etc/postfix/sender_sasl_passwd</code> in Configuration.</small></p>
+    {% endif %}
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="POST" action="{{ url_for('test_sender_routing') }}" class="row g-2 align-items-end">
+            {% include '_csrf.html' %}
+            <div class="col-md-8">
+                <label class="form-label mb-0 small">Test route (postmap -q)</label>
+                <input type="text" class="form-control form-control-sm" name="sender" placeholder="user@example.com" required>
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-outline-primary btn-sm w-100">Test Lookup</button>
+            </div>
+        </form>
+    </div>
 </div>
 
 <div class="card">
@@ -22,8 +49,8 @@
                 <thead>
                     <tr>
                         <th>Sender</th>
-                        <th>Transport</th>
-                        <th>Authentication</th>
+                        <th>Relay</th>
+                        <th>Options</th>
                         {% if current_user.role == 'admin' %}
                         <th>Actions</th>
                         {% endif %}
@@ -33,30 +60,41 @@
                     {% for entry in entries %}
                     <tr>
                         <td><strong>{{ entry.sender }}</strong></td>
-                        <td><code>{{ entry.transport }}</code></td>
                         <td>
-                            {% if entry.options.get('smtp_sasl_auth_enable') == 'yes' %}
-                            <span class="badge bg-success">Enabled</span>
-                            {% else %}
-                            <span class="badge bg-secondary">Disabled</span>
+                            <code>{{ entry.transport }}</code>
+                            <br><small class="text-muted">{{ entry.host }}:{{ entry.port }}</small>
+                        </td>
+                        <td>
+                            {% if entry.has_auth or entry.options.get('smtp_sasl_auth_enable') == 'yes' %}
+                            <span class="badge badge-status-ok">SASL</span>
+                            {% endif %}
+                            {% if entry.options.get('smtp_tls_security_level') %}
+                            <span class="badge badge-status-neutral">TLS: {{ entry.options.smtp_tls_security_level }}</span>
+                            {% endif %}
+                            {% if entry.options.get('smtp_bind_address') %}
+                            <span class="badge badge-status-neutral">Bind: {{ entry.options.smtp_bind_address }}</span>
+                            {% endif %}
+                            {% if not entry.has_auth and not entry.options.get('smtp_tls_security_level') and not entry.options.get('smtp_bind_address') %}
+                            <span class="text-muted">—</span>
                             {% endif %}
                         </td>
                         {% if current_user.role == 'admin' %}
                         <td>
-                            <form method="POST" action="{{ url_for('delete_sender_routing') }}" 
+                            <button type="button" class="btn btn-outline-primary btn-sm"
+                                    onclick='openRuleModal("edit", {{ entry | tojson }})'>Edit</button>
+                            <form method="POST" action="{{ url_for('delete_sender_routing') }}"
                                   style="display: inline;"
                                   onsubmit="return confirm('Delete rule?')">
+                                {% include '_csrf.html' %}
                                 <input type="hidden" name="sender" value="{{ entry.sender }}">
-                                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                                <button type="submit" class="btn btn-outline-danger btn-sm">Delete</button>
                             </form>
                         </td>
                         {% endif %}
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="4" class="text-center text-muted">
-                            No routing rules configured
-                        </td>
+                        <td colspan="4" class="text-center text-muted">No routing rules configured</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -66,57 +104,82 @@
 </div>
 
 {% if current_user.role == 'admin' %}
-<div class="modal fade" id="addModal" tabindex="-1">
+<div class="modal fade" id="ruleModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Add Routing Rule</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <h5 class="modal-title" id="ruleModalTitle">Add Routing Rule</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" action="{{ url_for('add_sender_routing') }}">
+            <form method="POST" id="ruleForm" action="{{ url_for('add_sender_routing') }}">
+                {% include '_csrf.html' %}
+                <input type="hidden" name="original_sender" id="original_sender" value="">
                 <div class="modal-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="sender" class="form-label">Sender *</label>
-                                <input type="text" class="form-control" id="sender" name="sender" 
-                                       placeholder="user@example.com or @domain.com" required>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="transport" class="form-label">Transport *</label>
-                                <input type="text" class="form-control" id="transport" name="transport" 
-                                       placeholder="smtp:mail.example.com:587" required>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="use_auth" 
-                                   name="use_auth" value="yes"
-                                   onchange="document.getElementById('authFields').style.display = this.checked ? 'block' : 'none'">
-                            <label class="form-check-label" for="use_auth">
-                                Use authentication
-                            </label>
-                        </div>
-                    </div>
-                    
-                    <div id="authFields" style="display: none;">
-                        <div class="mb-3">
-                            <label for="smtp_username" class="form-label">Username</label>
-                            <input type="text" class="form-control" id="smtp_username" name="smtp_username">
-                        </div>
-                    </div>
+                    {% include 'sender_routing_form_fields.html' %}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Add Rule</button>
+                    <button type="submit" class="btn btn-primary" id="ruleModalSubmit">Add Rule</button>
                 </div>
             </form>
         </div>
     </div>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleAuthFields(checked) {
+    const el = document.getElementById('field_authFields');
+    if (el) el.style.display = checked ? 'block' : 'none';
+}
+
+function openRuleModal(mode, entry) {
+    const form = document.getElementById('ruleForm');
+    const title = document.getElementById('ruleModalTitle');
+    const submit = document.getElementById('ruleModalSubmit');
+    document.getElementById('field_sender').value = '';
+    document.getElementById('field_transport').value = '';
+    document.getElementById('field_use_auth').checked = false;
+    document.getElementById('field_smtp_username').value = '';
+    document.getElementById('field_smtp_password').value = '';
+    document.getElementById('field_smtp_password').placeholder = '';
+    toggleAuthFields(false);
+    const tls = document.getElementById('field_smtp_tls_security_level');
+    if (tls) tls.value = '';
+    const bind = document.getElementById('field_smtp_bind_address');
+    if (bind) bind.value = '';
+
+    if (mode === 'edit' && entry) {
+        form.action = '{{ url_for("edit_sender_routing") }}';
+        title.textContent = 'Edit Routing Rule';
+        submit.textContent = 'Save Changes';
+        document.getElementById('original_sender').value = entry.sender;
+        document.getElementById('field_sender').value = entry.sender;
+        document.getElementById('field_transport').value = entry.host + ':' + entry.port;
+        const useAuth = entry.has_auth || (entry.options && entry.options.smtp_sasl_auth_enable === 'yes');
+        document.getElementById('field_use_auth').checked = useAuth;
+        toggleAuthFields(useAuth);
+        document.getElementById('field_smtp_username').value =
+            (entry.options && (entry.options.smtp_sasl_username || entry.options.smtp_username)) || '';
+        document.getElementById('field_smtp_password').placeholder = 'Leave empty to keep current';
+        if (tls && entry.options) tls.value = entry.options.smtp_tls_security_level || '';
+        if (bind && entry.options) bind.value = entry.options.smtp_bind_address || '';
+    } else {
+        form.action = '{{ url_for("add_sender_routing") }}';
+        title.textContent = 'Add Routing Rule';
+        submit.textContent = 'Add Rule';
+        document.getElementById('original_sender').value = '';
+    }
+    new bootstrap.Modal(document.getElementById('ruleModal')).show();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const authCheck = document.getElementById('field_use_auth');
+    if (authCheck) {
+        authCheck.addEventListener('change', function() { toggleAuthFields(this.checked); });
+    }
+});
+</script>
 {% endblock %}

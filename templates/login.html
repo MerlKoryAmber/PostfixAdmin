@@ -1,29 +1,29 @@
 {% extends "base.html" %}
 
+{% block title %}Sign In{% endblock %}
+
 {% block content %}
-<div class="row justify-content-center mt-5">
-    <div class="col-md-5">
-        <div class="card">
-            <div class="card-header text-center py-3">
-                <h4 class="mb-0">Sign In</h4>
-            </div>
-            <div class="card-body p-4">
-                <form method="POST">
-                    <div class="mb-3">
-                        <label for="username" class="form-label">Username</label>
-                        <input type="text" class="form-control" id="username" name="username" 
-                               required autofocus>
-                    </div>
-                    <div class="mb-4">
-                        <label for="password" class="form-label">Password</label>
-                        <input type="password" class="form-control" id="password" name="password" 
-                               required>
-                    </div>
-                    <div class="d-grid">
-                        <button type="submit" class="btn btn-primary btn-lg">Sign In</button>
-                    </div>
-                </form>
-            </div>
+<div class="login-page">
+    <div class="card login-card">
+        <div class="card-header">
+            <h1>InterROS</h1>
+            <p>Postfix Administration Panel</p>
+        </div>
+        <div class="card-body p-4">
+            <form method="POST">
+                {% include '_csrf.html' %}
+                <div class="mb-3">
+                    <label for="username" class="form-label">Username</label>
+                    <input type="text" class="form-control" id="username" name="username" required autofocus>
+                </div>
+                <div class="mb-4">
+                    <label for="password" class="form-label">Password</label>
+                    <input type="password" class="form-control" id="password" name="password" required>
+                </div>
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-primary btn-lg">Sign In</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
