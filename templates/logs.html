@@ -59,7 +59,7 @@
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover table-striped mb-0" id="logsTable">
+            <table class="table table-hover table-striped mb-0 w-100" id="logsTable">
                 <thead>
                     <tr>
                         <th>Time</th>
@@ -67,7 +67,7 @@
                         <th>To</th>
                         <th>Status</th>
                         <th>Relay</th>
-                        <th>Raw Message</th>
+                        <th class="w-50">Raw Message</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -88,7 +88,7 @@
                             {% endif %}
                         </td>
                         <td><small>{{ log.relay }}</small></td>
-                        <td class="small text-muted raw-log" title="{{ log.raw }}">{{ log.raw }}</td>
+                        <td class="small raw-log" title="{{ log.raw }}">{{ log.raw }}</td>
                     </tr>
                     {% else %}
                     <tr>
