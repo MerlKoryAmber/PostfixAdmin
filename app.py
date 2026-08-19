@@ -10,6 +10,8 @@ import socket
 import subprocess
 import json
 import shutil
+import gzip
+import glob
 import ipaddress
 from datetime import datetime, timedelta
 from collections import defaultdict, Counter, deque
@@ -46,7 +48,10 @@ USERS_FILE = os.environ.get('USERS_FILE', '/opt/postfix-admin/users.json')
 IP_WHITELIST_FILE = '/opt/postfix-admin/ip_whitelist.json'
 NGINX_ALLOW_CONF = '/opt/postfix-admin/nginx-allow.conf'
 LOG_FILE = '/var/log/maillog'
-MAX_LOG_LINES = 500
+LOG_WINDOW_HOURS = 24
+MAX_LOG_LINES = 100000
+LOG_PER_PAGE_CHOICES = (50, 100, 200)
+LOG_PER_PAGE_DEFAULT = 100
 SENDER_MAP_DEFAULT = '/etc/postfix/sender_transport'
 SASL_PASSWD_FILE = '/etc/postfix/sender_sasl_passwd'
 SASL_PASSWD_MAPS = f'hash:{SASL_PASSWD_FILE}'
@@ -678,7 +683,124 @@ _LOG_STATUS_RE = re.compile(r'status=([^\s,]+)')
 _LOG_RELAY_RE = re.compile(r'relay=([^\s,]+)')
 _LOG_CONV_HOST_RE = re.compile(r'conversation with ([^\s\[]+)')
 _LOG_CONNECT_TO_RE = re.compile(r'connect to ([^\s\[]+)')
-LOG_PARSE_CONTEXT_LINES = 2000
+_READ_BLOCK = 256 * 1024
+
+
+def syslog_datetime(ts, now=None):
+    """Parse maillog timestamp to naive local datetime. BSD syslog has no year."""
+    now = now or datetime.now()
+    if not ts:
+        return None
+    ts = ts.strip()
+    try:
+        if ts[:1].isdigit():
+            iso = ts.replace('Z', '+00:00')
+            dt = datetime.fromisoformat(iso)
+            if dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
+            return dt
+        dt = datetime.strptime(ts, '%b %d %H:%M:%S').replace(year=now.year)
+        if dt > now + timedelta(days=2):
+            dt = dt.replace(year=now.year - 1)
+        return dt
+    except ValueError:
+        return None
+
+
+def maillog_source_paths(path):
+    """Newest first: current file, then logrotate .1 / .1.gz, then dated copies."""
+    ordered = [path, path + '.1', path + '.1.gz']
+    ordered.extend(sorted(glob.glob(path + '-*'), reverse=True))
+    seen = set()
+    out = []
+    for p in ordered:
+        if p not in seen and os.path.isfile(p):
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def _read_file_since(path, cutoff, now):
+    """Lines with timestamp >= cutoff, chronological. reached_old: hit a line before cutoff."""
+    opener = gzip.open if path.endswith('.gz') else open
+    try:
+        with opener(path, 'rb') as f:
+            f.seek(0, 2)
+            size = f.tell()
+            if size == 0:
+                return [], False
+            pos = size
+            kept = []
+            carry = b''
+            reached_old = False
+            while pos > 0 and not reached_old:
+                read_at = max(0, pos - _READ_BLOCK)
+                f.seek(read_at)
+                data = f.read(pos - read_at)
+                pos = read_at
+                text = data + carry
+                parts = text.split(b'\n')
+                if pos > 0:
+                    carry = parts[0]
+                    parts = parts[1:]
+                else:
+                    carry = b''
+                for chunk in reversed(parts):
+                    if not chunk.strip():
+                        continue
+                    line = chunk.decode('utf-8', errors='replace')
+                    dt = syslog_datetime(parse_log_line(line)['timestamp'], now)
+                    if dt is None:
+                        kept.append(line)
+                        continue
+                    if dt < cutoff:
+                        reached_old = True
+                        break
+                    kept.append(line)
+            kept.reverse()
+            return kept, reached_old
+    except OSError:
+        return [], False
+
+
+def read_maillog_window(path, hours=LOG_WINDOW_HOURS, now=None, display_max=MAX_LOG_LINES):
+    """Entries from the last `hours` (default 24). Truncates at display_max."""
+    now = now or datetime.now()
+    cutoff = now - timedelta(hours=hours)
+    batches = []
+    for fp in maillog_source_paths(path):
+        batch, reached_old = _read_file_since(fp, cutoff, now)
+        if batch:
+            batches.append(batch)
+        if reached_old:
+            break
+    raw = []
+    for batch in reversed(batches):
+        raw.extend(batch)
+    parsed = parse_maillog_lines(raw)
+    in_window = []
+    for entry in parsed:
+        dt = syslog_datetime(entry['timestamp'], now)
+        if dt is None or dt >= cutoff:
+            in_window.append(entry)
+    matched = len(in_window)
+    truncated = matched > display_max
+    if truncated:
+        in_window = in_window[-display_max:]
+    return {
+        'entries': in_window,
+        'truncated': truncated,
+        'hours': hours,
+        'matched': matched,
+    }
+
+
+def paginate_items(items, page, per_page):
+    total = len(items)
+    pages = max(1, (total + per_page - 1) // per_page) if total else 1
+    page = min(max(1, int(page or 1)), pages)
+    start = (page - 1) * per_page
+    return items[start:start + per_page], page, pages, total
 
 
 def parse_log_line(line):
@@ -757,16 +879,6 @@ def parse_maillog_lines(lines):
         out.append(entry)
     return out
 
-
-def read_maillog_tail(path, display_max=MAX_LOG_LINES, context_max=LOG_PARSE_CONTEXT_LINES):
-    if not os.path.exists(path):
-        return []
-    with open(path, 'r', errors='replace') as f:
-        raw_lines = list(deque(f, maxlen=context_max))
-    parsed = parse_maillog_lines(raw_lines)
-    if len(parsed) > display_max:
-        return parsed[-display_max:]
-    return parsed
 
 QUEUE_LINE_RE = re.compile(
     r'^(?P<qid>[A-F0-9]{6,20})(?P<flag>[*!])?\s+(?P<size>\d+)\s+'
@@ -1761,7 +1873,8 @@ def api_stats():
 @app.route('/logs')
 @login_required
 def view_logs():
-    parsed = read_maillog_tail(LOG_FILE)
+    bundle = read_maillog_window(LOG_FILE)
+    parsed = bundle['entries']
     from_filter = sanitize_input(request.args.get('from',''))
     to_filter = sanitize_input(request.args.get('to',''))
     status_filter = sanitize_input(request.args.get('status',''))
@@ -1774,8 +1887,17 @@ def view_logs():
             continue
         if filter_type == 'postfix' and 'postfix' not in entry['raw'].lower():
             continue
-        if search and search.lower() not in entry['raw'].lower():
-            continue
+        if search:
+            q = search.lower()
+            hay = ' '.join((
+                entry.get('raw') or '',
+                entry.get('from') or '',
+                entry.get('to') or '',
+                entry.get('status') or '',
+                entry.get('relay') or '',
+            )).lower()
+            if q not in hay:
+                continue
         if from_filter and from_filter.lower() not in entry['from'].lower():
             continue
         if to_filter and to_filter.lower() not in entry['to'].lower():
@@ -1785,9 +1907,44 @@ def view_logs():
         if relay_filter and relay_filter.lower() not in entry['relay'].lower():
             continue
         filtered.append(entry)
-    return render_template('logs.html', logs=filtered, filter_type=filter_type, search=search,
-                           from_filter=from_filter, to_filter=to_filter,
-                           status_filter=status_filter, relay_filter=relay_filter)
+    per_page = request.args.get('per_page', LOG_PER_PAGE_DEFAULT, type=int)
+    if per_page not in LOG_PER_PAGE_CHOICES:
+        per_page = LOG_PER_PAGE_DEFAULT
+    logs_page, page, pages, total = paginate_items(
+        filtered, request.args.get('page', 1, type=int), per_page
+    )
+    log_query = {
+        'per_page': per_page,
+        'filter': filter_type,
+    }
+    if from_filter:
+        log_query['from'] = from_filter
+    if to_filter:
+        log_query['to'] = to_filter
+    if status_filter:
+        log_query['status'] = status_filter
+    if relay_filter:
+        log_query['relay'] = relay_filter
+    if search:
+        log_query['search'] = search
+    return render_template(
+        'logs.html',
+        logs=logs_page,
+        filter_type=filter_type,
+        search=search,
+        from_filter=from_filter,
+        to_filter=to_filter,
+        status_filter=status_filter,
+        relay_filter=relay_filter,
+        log_hours=bundle['hours'],
+        log_truncated=bundle['truncated'],
+        log_matched=bundle['matched'],
+        page=page,
+        pages=pages,
+        per_page=per_page,
+        total=total,
+        log_query=log_query,
+    )
 
 @app.route('/api/logs')
 @login_required

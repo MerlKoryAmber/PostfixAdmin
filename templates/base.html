@@ -7,7 +7,7 @@
     <title>{% block title %}Postfix Admin{% endblock %} — InterROS</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}?v=2">
     <link rel="stylesheet" href="{{ url_for('static', filename='bootstrap.min.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=ui10">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=ui11">
 </head>
 <body class="{% if current_user.is_authenticated %}has-sidebar{% else %}login-body{% endif %}">
     {% if current_user.is_authenticated %}

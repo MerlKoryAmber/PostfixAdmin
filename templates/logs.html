@@ -40,9 +40,15 @@
                     <option value="errors" {% if filter_type == 'errors' %}selected{% endif %}>Только ошибки</option>
                 </select>
             </div>
-            <div class="col-12">
+            <div class="col-12 d-flex flex-wrap gap-2 align-items-end">
                 <button type="submit" class="btn btn-primary">Применить</button>
                 <a href="{{ url_for('view_logs') }}" class="btn btn-secondary">Сбросить</a>
+                <label class="form-label mb-0 ms-md-2" for="per_page">На странице</label>
+                <select name="per_page" id="per_page" class="form-select" style="width: auto;">
+                    {% for n in (50, 100, 200) %}
+                    <option value="{{ n }}" {% if per_page == n %}selected{% endif %}>{{ n }}</option>
+                    {% endfor %}
+                </select>
             </div>
         </form>
     </div>
@@ -51,11 +57,13 @@
 <!-- Таблица логов -->
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span>Файл: /var/log/maillog</span>
-        <input type="search" class="form-control form-control-sm"
-               placeholder="Живой фильтр по показанным…"
-               data-filter-table="#logsTable">
-        <small class="text-muted">Показано записей: {{ logs|length }}</small>
+        <span>Файл: /var/log/maillog · окно {{ log_hours }} ч</span>
+        <small class="text-muted">
+            Найдено за сутки: {{ total }}
+            · стр. {{ page }}/{{ pages }}
+            · на экране: {{ logs|length }}
+            {% if log_truncated %} · сырой хвост обрезан лимитом файла ({{ log_matched }}){% endif %}
+        </small>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
@@ -99,18 +107,29 @@
             </table>
         </div>
     </div>
+    {% if pages > 1 %}
+    <div class="card-footer d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <small class="text-muted">Страница {{ page }} из {{ pages }}</small>
+        <nav>
+            <ul class="pagination pagination-sm mb-0">
+                <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('view_logs', page=page-1, **log_query) }}">←</a>
+                </li>
+                {% for p in range(1, pages + 1) %}
+                    {% if p == 1 or p == pages or (p >= page - 2 and p <= page + 2) %}
+                    <li class="page-item {% if p == page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('view_logs', page=p, **log_query) }}">{{ p }}</a>
+                    </li>
+                    {% elif p == page - 3 or p == page + 3 %}
+                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                <li class="page-item {% if page >= pages %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('view_logs', page=page+1, **log_query) }}">→</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-// Автообновление каждые 30 секунд (опционально)
-setInterval(function() {
-    fetch('/api/logs')
-        .then(response => response.json())
-        .then(data => {
-            console.log('Logs updated:', data.lines.length);
-        });
-}, 30000);
-</script>
 {% endblock %}
