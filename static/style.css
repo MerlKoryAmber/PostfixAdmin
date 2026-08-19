@@ -281,8 +281,58 @@ body.has-sidebar .app-shell {
     }
 }
 
-/* For login page: center content (Bootstrap cards will handle the rest) */
+/* --- Login page layout --- */
+html,
+body {
+    background: var(--bg-page);
+}
+
 body.login-body {
+    min-height: 100vh;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.login-page {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+}
+
+.login-card {
+    width: 100%;
+    max-width: 520px;
+}
+
+.login-card .card-header {
+    text-align: center;
+    padding: 1.75rem 1.25rem 0.5rem;
+    border-bottom: none;
+    background: var(--bg-card);
+}
+
+.login-logo {
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 1rem;
     display: block;
+}
+
+.login-card .card-header h1 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dark);
+}
+
+.login-card .card-header p {
+    margin: 0.5rem 0 0;
+    color: var(--text-muted);
+    font-size: 0.875rem;
 }
 
