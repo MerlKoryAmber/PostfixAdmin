@@ -21,19 +21,15 @@ Mood: night NOC, not marketing site. Login is a compact card, not a hero.
 
 | Token | Hex | Role |
 |---|---|---|
-| canvas | `#000000` | Page, topbar, footer |
-| surface-1 | `#15181e` | Cards, sidebar, table body |
-| surface-2 | `#1f232b` | Inputs, hover, striped rows |
-| surface-3 | `#3b3d45` | Strong hairline / dividers |
-| hairline | `rgba(178,182,189,0.14)` | Card and table borders |
-| ink | `#ffffff` | Titles, primary text |
-| ink-muted | `#b2b6bd` | Labels, secondary, raw logs |
-| ink-subtle | `#656a76` | Eyebrows, hints |
-| accent | `#14c6cb` | Primary CTA, focus, active nav, links |
-| accent-hover | `#12b6bb` | Primary hover |
-| success | `#00ca8e` | sent / up |
-| warning | `#ffcf25` | deferred / warn |
-| danger | `#e62b1e` | bounce / error |
+| canvas | `#0b1220` | Page, topbar, footer |
+| surface-1 | `#111827` | Cards, sidebar, table body |
+| surface-2 | `#0f172a` | Inputs, hover, striped rows |
+| hairline | `rgba(148,163,184,0.18)` | Card and table borders |
+| ink | `#f8fafc` | Titles, primary text |
+| ink-muted | `#94a3b8` | Labels, secondary, raw logs |
+| accent | `#4cc9d8` | InterROS teal — CTA, focus, nav, links |
+| accent-hover | `#3db8c7` | Primary hover |
+| danger | `#c45c5c` | Destructive — muted, not Bootstrap `#dc3545` |
 
 ### Light
 
@@ -47,11 +43,11 @@ Mood: night NOC, not marketing site. Login is a compact card, not a hero.
 | hairline | `rgba(15,23,42,0.14)` |
 | accent | `#0e8f94` |
 
-Never: cyan fills on entire cards; second brand hue; white text on dark-cyan-on-dark-gray sandwiches; Bootstrap default blue primary.
+Never: Bootstrap default blue (`#0d6efd`) or red (`#dc3545`); Google Fonts / any render-blocking CDN; HashiCorp product accents.
 
 ## 3. Typography Rules
 
-Substitute for proprietary sans: **Inter** (400/500/600/700). Mono for raw logs and config: **IBM Plex Mono** or `ui-monospace`.
+Local stack only (no webfonts): `"Segoe UI", system-ui, sans-serif`. Mono: `ui-monospace`, Cascadia, Consolas.
 
 - Page title: 22–28px, weight 600, tracking −0.4px, ink
 - Body / table: 14–16px, weight 500, line-height 1.5
