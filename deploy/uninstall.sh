@@ -15,6 +15,8 @@ INSTALL_DIR="/opt/postfix-admin"
 APP_USER="postfixadmin"
 SENDER_MAP="/etc/postfix/sender_transport"
 SASL_PASSWD="/etc/postfix/sender_sasl_passwd"
+TLS_CERT="/etc/nginx/ssl/postfix-admin.crt"
+TLS_KEY="/etc/nginx/ssl/postfix-admin.key"
 
 echo -e "${YELLOW}=========================================${NC}"
 echo -e "${YELLOW}Postfix Admin Uninstall${NC}"
@@ -35,6 +37,9 @@ if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
 fi
 
 read -p "Also remove empty panel-created map files if unused? (y/N): " REMOVE_MAPS
+read -p "Also remove Postfix Admin TLS certificate/key from /etc/nginx/ssl? (y/N): " REMOVE_TLS
+read -p "Also remove firewall-cmd http/https service rules added for the panel? (y/N): " REMOVE_FIREWALL
+read -p "Also remove local user $APP_USER if it exists? (y/N): " REMOVE_APP_USER
 if [[ "$REMOVE_MAPS" =~ ^[Yy]$ ]]; then
     for f in "$SENDER_MAP" "$SASL_PASSWD"; do
         if [ -f "$f" ] && grep -q "Managed via web interface" "$f" 2>/dev/null; then
@@ -68,17 +73,28 @@ else
     echo -e "${YELLOW}Nginx config test failed — reload skipped.${NC}"
 fi
 
-echo -e "\n${GREEN}Removing SSL certificate...${NC}"
-rm -f /etc/nginx/ssl/postfix-admin.crt
-rm -f /etc/nginx/ssl/postfix-admin.key
+if [[ "$REMOVE_TLS" =~ ^[Yy]$ ]]; then
+    echo -e "\n${GREEN}Removing TLS certificate/key...${NC}"
+    rm -f "$TLS_CERT" "$TLS_KEY"
+else
+    echo -e "\n${YELLOW}Keeping TLS certificate/key:${NC} $TLS_CERT $TLS_KEY"
+fi
 
-echo -e "\n${GREEN}Removing application user...${NC}"
-userdel "$APP_USER" 2>/dev/null || true
+if [[ "$REMOVE_APP_USER" =~ ^[Yy]$ ]]; then
+    echo -e "\n${GREEN}Removing application user...${NC}"
+    userdel "$APP_USER" 2>/dev/null || true
+else
+    echo -e "\n${YELLOW}Keeping application user:${NC} $APP_USER"
+fi
 
-echo -e "\n${GREEN}Removing firewall rules...${NC}"
-firewall-cmd --permanent --remove-service=http 2>/dev/null || true
-firewall-cmd --permanent --remove-service=https 2>/dev/null || true
-firewall-cmd --reload 2>/dev/null || true
+if [[ "$REMOVE_FIREWALL" =~ ^[Yy]$ ]]; then
+    echo -e "\n${GREEN}Removing firewall rules...${NC}"
+    firewall-cmd --permanent --remove-service=http 2>/dev/null || true
+    firewall-cmd --permanent --remove-service=https 2>/dev/null || true
+    firewall-cmd --reload 2>/dev/null || true
+else
+    echo -e "\n${YELLOW}Keeping firewall rules unchanged.${NC}"
+fi
 
 echo -e "\n${GREEN}=========================================${NC}"
 echo -e "${GREEN}Uninstall complete.${NC}"

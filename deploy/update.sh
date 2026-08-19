@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+shopt -s nullglob
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -20,6 +21,38 @@ GITHUB_REPO="https://github.com/MerlKoryAmber/PostfixAdmin"
 TEMP_DIR="/tmp/postfix-admin-update"
 LIVE_SERVICE_FILE="/etc/systemd/system/postfix-admin.service"
 SERVICE_SAMPLE_FILE="$INSTALL_DIR/deploy/postfix-admin.service"
+SOURCE_DIR=""
+UPDATE_ALL=false
+UPDATE_APP=false
+UPDATE_TEMPLATES=false
+UPDATE_STATIC=false
+UPDATE_DEPLOY=false
+
+require_command() {
+    local cmd="$1"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo -e "${RED}Required command not found: $cmd${NC}"
+        exit 1
+    fi
+}
+
+resolve_source_dir() {
+    local pattern="$1"
+    local matches=("$TEMP_DIR"/$pattern)
+    if [ ${#matches[@]} -gt 0 ] && [ -d "${matches[0]}" ]; then
+        SOURCE_DIR="${matches[0]}"
+        return 0
+    fi
+    return 1
+}
+
+validate_source_tree() {
+    if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/app.py" ] || [ ! -d "$SOURCE_DIR/templates" ] || [ ! -d "$SOURCE_DIR/static" ] || [ ! -d "$SOURCE_DIR/deploy" ]; then
+        echo -e "${RED}Downloaded source tree is incomplete.${NC}"
+        echo -e "${YELLOW}Source dir checked:${NC} ${SOURCE_DIR:-<unset>}"
+        exit 1
+    fi
+}
 
 echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}Postfix Admin Update Script${NC}"
@@ -37,6 +70,8 @@ if [ ! -d "$INSTALL_DIR" ]; then
     echo -e "${RED}Postfix Admin is not installed in $INSTALL_DIR${NC}"
     exit 1
 fi
+
+require_command curl
 
 # Выбор режима обновления
 echo ""
@@ -82,7 +117,7 @@ echo -e "${GREEN}=========================================${NC}"
 # 1. Создание резервной копии
 echo -e "\n${YELLOW}Creating backup in $BACKUP_DIR...${NC}"
 mkdir -p "$BACKUP_DIR"
-cp -r "$INSTALL_DIR"/* "$BACKUP_DIR/" 2>/dev/null || true
+cp -a "$INSTALL_DIR"/. "$BACKUP_DIR"/ 2>/dev/null || true
 echo -e "${GREEN}Backup created.${NC}"
 
 # 2. Загрузка файлов из GitHub
@@ -91,6 +126,7 @@ echo -e "\n${YELLOW}Downloading files from GitHub...${NC}"
 # Очистка временной директории
 rm -rf "$TEMP_DIR"
 mkdir -p "$TEMP_DIR"
+SOURCE_DIR="$TEMP_DIR"
 
 # Проверяем наличие git или используем wget/curl
 if command -v git &> /dev/null; then
@@ -102,8 +138,10 @@ if command -v git &> /dev/null; then
         if [ -n "$LATEST_RELEASE" ]; then
             curl -L -o "$TEMP_DIR/release.tar.gz" "$LATEST_RELEASE"
             tar -xzf "$TEMP_DIR/release.tar.gz" -C "$TEMP_DIR"
-            # Перемещаем файлы из поддиректории
-            mv "$TEMP_DIR"/MerlKoryAmber-PostfixAdmin-*/* "$TEMP_DIR/" 2>/dev/null || true
+            resolve_source_dir 'MerlKoryAmber-PostfixAdmin-*' || {
+                echo -e "${RED}Unable to locate extracted release directory.${NC}"
+                exit 1
+            }
         else
             echo -e "${YELLOW}No releases found. Falling back to main branch.${NC}"
             git clone --depth 1 "$GITHUB_REPO" "$TEMP_DIR"
@@ -136,13 +174,21 @@ else
     # Распаковка
     if [ -f "$TEMP_DIR/release.tar.gz" ]; then
         tar -xzf "$TEMP_DIR/release.tar.gz" -C "$TEMP_DIR"
-        mv "$TEMP_DIR"/MerlKoryAmber-PostfixAdmin-*/* "$TEMP_DIR/" 2>/dev/null || true
+        resolve_source_dir 'MerlKoryAmber-PostfixAdmin-*' || {
+            echo -e "${RED}Unable to locate extracted release directory.${NC}"
+            exit 1
+        }
     elif [ -f "$TEMP_DIR/repo.zip" ]; then
+        require_command unzip
         unzip -q "$TEMP_DIR/repo.zip" -d "$TEMP_DIR"
-        mv "$TEMP_DIR"/PostfixAdmin-*/* "$TEMP_DIR/" 2>/dev/null || true
+        resolve_source_dir 'PostfixAdmin-*' || {
+            echo -e "${RED}Unable to locate extracted repository directory.${NC}"
+            exit 1
+        }
     fi
 fi
 
+validate_source_tree
 echo -e "${GREEN}Files downloaded successfully.${NC}"
 
 # 3. Остановка сервиса
@@ -153,8 +199,8 @@ sleep 2
 # 4. Обновление файлов
 if [ "$UPDATE_ALL" = true ] || [ "$UPDATE_APP" = true ]; then
     echo -e "\n${GREEN}Updating app.py...${NC}"
-    if [ -f "$TEMP_DIR/app.py" ]; then
-        cp "$TEMP_DIR/app.py" "$INSTALL_DIR/app.py"
+    if [ -f "$SOURCE_DIR/app.py" ]; then
+        cp "$SOURCE_DIR/app.py" "$INSTALL_DIR/app.py"
         echo -e "${GREEN}app.py updated.${NC}"
     else
         echo -e "${YELLOW}app.py not found in repository. Skipping.${NC}"
@@ -163,8 +209,8 @@ fi
 
 if [ "$UPDATE_ALL" = true ] || [ "$UPDATE_TEMPLATES" = true ]; then
     echo -e "\n${GREEN}Updating templates...${NC}"
-    if [ -d "$TEMP_DIR/templates" ]; then
-        cp -r "$TEMP_DIR/templates"/* "$INSTALL_DIR/templates/"
+    if [ -d "$SOURCE_DIR/templates" ]; then
+        cp -a "$SOURCE_DIR/templates"/. "$INSTALL_DIR/templates/"
         echo -e "${GREEN}Templates updated.${NC}"
     else
         echo -e "${YELLOW}templates/ not found in repository. Skipping.${NC}"
@@ -173,8 +219,8 @@ fi
 
 if [ "$UPDATE_ALL" = true ] || [ "$UPDATE_STATIC" = true ]; then
     echo -e "\n${GREEN}Updating static files...${NC}"
-    if [ -d "$TEMP_DIR/static" ]; then
-        cp -r "$TEMP_DIR/static"/* "$INSTALL_DIR/static/"
+    if [ -d "$SOURCE_DIR/static" ]; then
+        cp -a "$SOURCE_DIR/static"/. "$INSTALL_DIR/static/"
         echo -e "${GREEN}Static files updated.${NC}"
     else
         echo -e "${YELLOW}static/ not found in repository. Skipping.${NC}"
@@ -183,15 +229,15 @@ fi
 
 if [ "$UPDATE_ALL" = true ] || [ "$UPDATE_DEPLOY" = true ]; then
     echo -e "\n${GREEN}Updating deploy scripts...${NC}"
-    if [ -d "$TEMP_DIR/deploy" ]; then
-        cp "$TEMP_DIR/deploy/install.sh" "$INSTALL_DIR/deploy/" 2>/dev/null || true
-        cp "$TEMP_DIR/deploy/uninstall.sh" "$INSTALL_DIR/deploy/" 2>/dev/null || true
-        cp "$TEMP_DIR/deploy/update.sh" "$INSTALL_DIR/deploy/" 2>/dev/null || true
-        cp "$TEMP_DIR/deploy/nginx-https.conf" "$INSTALL_DIR/deploy/" 2>/dev/null || true
-        cp "$TEMP_DIR/deploy/postfix-admin.service" "$INSTALL_DIR/deploy/" 2>/dev/null || true
-        if [ -f "$TEMP_DIR/deploy/postfix-admin.service" ]; then
+    if [ -d "$SOURCE_DIR/deploy" ]; then
+        cp "$SOURCE_DIR/deploy/install.sh" "$INSTALL_DIR/deploy/" 2>/dev/null || true
+        cp "$SOURCE_DIR/deploy/uninstall.sh" "$INSTALL_DIR/deploy/" 2>/dev/null || true
+        cp "$SOURCE_DIR/deploy/update.sh" "$INSTALL_DIR/deploy/" 2>/dev/null || true
+        cp "$SOURCE_DIR/deploy/nginx-https.conf" "$INSTALL_DIR/deploy/" 2>/dev/null || true
+        cp "$SOURCE_DIR/deploy/postfix-admin.service" "$INSTALL_DIR/deploy/" 2>/dev/null || true
+        if [ -f "$SOURCE_DIR/deploy/postfix-admin.service" ]; then
             echo -e "${YELLOW}Live systemd unit is left untouched to preserve the working SECRET_KEY and runtime settings.${NC}"
-            if [ -f "$LIVE_SERVICE_FILE" ] && ! cmp -s "$TEMP_DIR/deploy/postfix-admin.service" "$LIVE_SERVICE_FILE"; then
+            if [ -f "$LIVE_SERVICE_FILE" ] && ! cmp -s "$SOURCE_DIR/deploy/postfix-admin.service" "$LIVE_SERVICE_FILE"; then
                 echo -e "${YELLOW}Review the sample unit at $SERVICE_SAMPLE_FILE before making manual service changes.${NC}"
             fi
         fi
@@ -203,7 +249,7 @@ fi
 
 # 5. Обновление прав
 echo -e "\n${GREEN}Updating permissions...${NC}"
-chown -R $APP_USER:$APP_GROUP "$INSTALL_DIR"
+chown -R "$APP_USER:$APP_GROUP" "$INSTALL_DIR"
 echo -e "${GREEN}Permissions updated.${NC}"
 
 # 6. Очистка временных файлов
@@ -223,8 +269,9 @@ else
     # Откат
     systemctl stop postfix-admin 2>/dev/null || true
     rm -rf "$INSTALL_DIR"
-    cp -r "$BACKUP_DIR" "$INSTALL_DIR"
-    chown -R $APP_USER:$APP_GROUP "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
+    cp -a "$BACKUP_DIR"/. "$INSTALL_DIR"/
+    chown -R "$APP_USER:$APP_GROUP" "$INSTALL_DIR"
     systemctl start postfix-admin
     
     if systemctl is-active --quiet postfix-admin; then
@@ -247,7 +294,8 @@ echo ""
 echo -e "${YELLOW}To rollback manually:${NC}"
 echo -e "  systemctl stop postfix-admin"
 echo -e "  rm -rf $INSTALL_DIR"
-echo -e "  cp -r $BACKUP_DIR $INSTALL_DIR"
+echo -e "  mkdir -p $INSTALL_DIR"
+echo -e "  cp -a $BACKUP_DIR/. $INSTALL_DIR/"
 echo -e "  chown -R $APP_USER:$APP_GROUP $INSTALL_DIR"
 echo -e "  systemctl start postfix-admin"
 echo ""
