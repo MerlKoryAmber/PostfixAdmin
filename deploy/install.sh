@@ -309,8 +309,8 @@ else
     exit 1
 fi
 
-echo -e "\n${GREEN}Starting Nginx...${NC}"
-systemctl start nginx
+echo -e "\n${GREEN}Restarting Nginx...${NC}"
+systemctl restart nginx
 sleep 2
 if systemctl is-active --quiet nginx; then
     echo -e "${GREEN}Nginx is running.${NC}"
