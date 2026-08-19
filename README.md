@@ -1,4 +1,4 @@
-# Postfix Admin (InterROS)
+# Postfix Admin
 
 Веб-панель для уже установленного Postfix. Отдельной БД нет: читает и пишет файлы в `/etc/postfix`, хвост `/var/log/maillog`, вызывает `postmap`, `postfix check`, `postfix reload`, `postqueue` / `postsuper`.
 
@@ -56,18 +56,19 @@ sudo ./deploy/install.sh
 1. `dnf`: epel, python3, postfix, nginx, openssl, nmap-ncat, curl и связанное.
 2. Системный пользователь `postfixadmin` (nologin). Код панели — от него по файлам; **процесс Gunicorn — User=root**.
 3. Копирует в `/opt/postfix-admin` только runtime: `app.py`, `templates/`, `static/`, `requirements.txt`, скрипты `deploy/`. Каталоги `vendor/`, `.cursor/`, `DESIGN.md` на хост не кладутся.
-4. Создаёт venv `/opt/postfix-admin/venv` и ставит пакеты из `requirements.txt` (Flask 3, flask-login, flask-wtf, gunicorn).
-5. Не затирает существующие `/etc/postfix/sender_transport` и `sender_sasl_passwd`; пустые файлы создаёт только если их нет, затем `postmap`.
-6. Смотрит `main.cf` (`postconf`) и печатает режим sender routing.
-7. TLS: если **оба** файла `/etc/nginx/ssl/postfix-admin.crt` и `.key` уже есть — оставляет. Если есть только один — **остановка**. Если нет ни одного — self-signed на 10 лет, CN = первый IP хоста.
-8. Пишет `/opt/postfix-admin/nginx-allow.conf` (если файла нет: `allow all`), кладёт Nginx-конфиг в `/etc/nginx/conf.d/postfix-admin.conf`, удаляет `default.conf`, `nginx -t`.
-9. systemd unit `/etc/systemd/system/postfix-admin.service`: Gunicorn из venv, `127.0.0.1:8000`, `USERS_FILE`, `SECRET_KEY` (новый или прежний, если unit уже был).
-10. Сохраняет существующие `users.json` и `ip_whitelist.json`.
-11. `firewall-cmd` — сервисы http/https (если firewalld есть).
-12. `systemctl enable --now postfix-admin`, **restart** nginx.
-13. Спрашивает, создать ли первого admin (`venv/bin/flask create-user`).
+4. Спрашивает **название компании** (шапка, логин, футер). Пустой ввод = `Postfix Admin`. Пишет `/opt/postfix-admin/brand.json`. Повторная установка предлагает оставить прежнее имя.
+5. Создаёт venv `/opt/postfix-admin/venv` и ставит пакеты из `requirements.txt` (Flask 3, flask-login, flask-wtf, gunicorn).
+6. Не затирает существующие `/etc/postfix/sender_transport` и `sender_sasl_passwd`; пустые файлы создаёт только если их нет, затем `postmap`.
+7. Смотрит `main.cf` (`postconf`) и печатает режим sender routing.
+8. TLS: если **оба** файла `/etc/nginx/ssl/postfix-admin.crt` и `.key` уже есть — оставляет. Если есть только один — **остановка**. Если нет ни одного — self-signed на 10 лет, CN = первый IP хоста, O = название компании.
+9. Пишет `/opt/postfix-admin/nginx-allow.conf` (если файла нет: `allow all`), кладёт Nginx-конфиг в `/etc/nginx/conf.d/postfix-admin.conf`, удаляет `default.conf`, `nginx -t`.
+10. systemd unit `/etc/systemd/system/postfix-admin.service`: Gunicorn из venv, `127.0.0.1:8000`, `USERS_FILE`, `SECRET_KEY` (новый или прежний, если unit уже был).
+11. Сохраняет существующие `users.json` и `ip_whitelist.json`.
+12. `firewall-cmd` — сервисы http/https (если firewalld есть).
+13. `systemctl enable --now postfix-admin`, **restart** nginx.
+14. Спрашивает, создать ли первого admin (`venv/bin/flask create-user`).
 
-Повторный запуск install с тем же деревом — переустановка поверх; ключ и TLS при полных парах не сбрасываются.
+Повторный запуск install с тем же деревом — переустановка поверх; ключ и TLS при полных парах не сбрасываются. Название компании можно сменить в том же диалоге или правкой `/opt/postfix-admin/brand.json` и `systemctl restart postfix-admin`.
 
 ### 3. После скрипта
 
@@ -125,7 +126,7 @@ journalctl -u postfix-admin -n 30 --no-pager
 sudo /opt/postfix-admin/deploy/update.sh
 ```
 
-Скрипт качает [MerlKoryAmber/PostfixAdmin](https://github.com/MerlKoryAmber/PostfixAdmin) (релиз / `main` / тег), бэкап в `/opt/postfix-admin-backup-<дата>`, останавливает сервис, копирует выбранное (всё / только app / templates+static вместе / deploy), обновляет venv по `requirements.txt`, стартует сервис. `users.json` и whitelist не затираются.
+Скрипт качает [MerlKoryAmber/PostfixAdmin](https://github.com/MerlKoryAmber/PostfixAdmin) (релиз / `main` / тег), бэкап в `/opt/postfix-admin-backup-<дата>`, останавливает сервис, копирует выбранное (всё / только app / templates+static вместе / deploy), обновляет venv по `requirements.txt`, стартует сервис. `users.json`, whitelist и `brand.json` не затираются.
 
 Live unit `/etc/systemd/system/postfix-admin.service` **не переписывается** (SECRET_KEY). Образец лежит в `/opt/postfix-admin/deploy/postfix-admin.service`.
 
@@ -163,6 +164,7 @@ sudo /opt/postfix-admin/deploy/uninstall.sh
 | Путь | Назначение |
 |------|------------|
 | `/opt/postfix-admin` | Код, venv, json, nginx-allow |
+| `/opt/postfix-admin/brand.json` | Название компании в UI |
 | `/opt/postfix-admin/users.json` | Пользователи панели (`600`) |
 | `/opt/postfix-admin/ip_whitelist.json` | Белый список IP |
 | `/opt/postfix-admin/nginx-allow.conf` | `allow`/`deny` для Nginx |
@@ -215,7 +217,8 @@ transport_maps = hash:/etc/postfix/transport
 - только HTTPS, HSTS, CSRF на POST;
 - cookie `Secure`, `HttpOnly`, `SameSite=Lax`;
 - IP клиента для whitelist — `X-Real-IP` (его ставит Nginx);
-- конфиги пишутся атомарно, рядом `*.bak`.
+- конфиги пишутся атомарно, рядом `*.bak`;
+- смена TLS панели: Конфигурация → файлы ключа и сертификата/цепочки (PEM). Проверка соответствия ключа, `nginx -t`, затем reload. Старая пара остаётся как `.bak`.
 
 Пустой whitelist = пускать всех. Любая запись (IP или CIDR) — остальные режутся Nginx.
 

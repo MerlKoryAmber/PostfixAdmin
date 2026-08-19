@@ -108,6 +108,41 @@
                 </div>
             </div>
         </div>
+        {% if current_user.role == 'admin' and tls_info %}
+        <div class="card mb-3">
+            <div class="card-header">
+                <h6 class="mb-0">TLS панели (Nginx)</h6>
+            </div>
+            <div class="card-body small">
+                <p class="mb-1"><code>{{ tls_info.path_cert }}</code></p>
+                <p class="mb-2"><code>{{ tls_info.path_key }}</code></p>
+                {% if tls_info.present %}
+                <p class="mb-1">Subject: {{ tls_info.subject }}</p>
+                <p class="mb-1">Issuer: {{ tls_info.issuer }}</p>
+                <p class="mb-3">Действует до: {{ tls_info.not_after or '—' }}</p>
+                {% else %}
+                <p class="mb-3 text-muted">Файл сертификата пока не найден.</p>
+                {% endif %}
+                <form method="POST" action="{{ url_for('upload_panel_tls') }}" enctype="multipart/form-data">
+                    {% include '_csrf.html' %}
+                    <div class="mb-2">
+                        <label class="form-label" for="tls_cert">Сертификат (PEM)</label>
+                        <input class="form-control form-control-sm" type="file" id="tls_cert" name="tls_cert" accept=".pem,.crt,.cer,.cert" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="tls_chain">Цепочка (PEM, необязательно)</label>
+                        <input class="form-control form-control-sm" type="file" id="tls_chain" name="tls_chain" accept=".pem,.crt,.cer,.chain,.ca-bundle">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="tls_key">Приватный ключ (PEM)</label>
+                        <input class="form-control form-control-sm" type="file" id="tls_key" name="tls_key" accept=".pem,.key" required>
+                    </div>
+                    <p class="form-text mb-2">Листовой сертификат + промежуточные. Если fullchain уже в первом файле — цепочку можно не прикладывать. Ключ без пароля.</p>
+                    <button type="submit" class="btn btn-primary btn-sm w-100">Заменить сертификат</button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

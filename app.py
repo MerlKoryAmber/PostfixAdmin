@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Postfix Web Admin Interface
-Copyright (c) 2026 InterROS
 """
 
 import os
@@ -13,6 +12,7 @@ import shutil
 import gzip
 import glob
 import ipaddress
+import tempfile
 from datetime import datetime, timedelta
 from collections import defaultdict, Counter, deque
 from functools import wraps
@@ -40,6 +40,7 @@ app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
+    MAX_CONTENT_LENGTH=1024 * 1024,
 )
 
 TRANSPORT_FILE = '/etc/postfix/transport'
@@ -47,6 +48,17 @@ MAIN_CF_FILE = '/etc/postfix/main.cf'
 USERS_FILE = os.environ.get('USERS_FILE', '/opt/postfix-admin/users.json')
 IP_WHITELIST_FILE = '/opt/postfix-admin/ip_whitelist.json'
 NGINX_ALLOW_CONF = '/opt/postfix-admin/nginx-allow.conf'
+TLS_CERT_FILE = '/etc/nginx/ssl/postfix-admin.crt'
+TLS_KEY_FILE = '/etc/nginx/ssl/postfix-admin.key'
+MAX_TLS_UPLOAD = 256 * 1024
+_PEM_CERT_RE = re.compile(
+    br'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', re.DOTALL
+)
+_PEM_KEY_RE = re.compile(
+    br'-----BEGIN (?:RSA |EC )?PRIVATE KEY-----.*?-----END (?:RSA |EC )?PRIVATE KEY-----',
+    re.DOTALL,
+)
+BRAND_FILE = os.environ.get('BRAND_FILE', '/opt/postfix-admin/brand.json')
 LOG_FILE = '/var/log/maillog'
 LOG_WINDOW_HOURS = 24
 MAX_LOG_LINES = 100000
@@ -111,9 +123,24 @@ def login_register_success(ip):
         _login_attempts.pop(ip, None)
 
 # --- Context processor for dynamic year ---
+def load_company_name():
+    env = (os.environ.get('COMPANY_NAME') or '').strip()
+    if env:
+        return env[:80]
+    if os.path.exists(BRAND_FILE):
+        try:
+            with open(BRAND_FILE, 'r', encoding='utf-8') as f:
+                name = (json.load(f).get('company_name') or '').strip()
+                if name:
+                    return name[:80]
+        except (json.JSONDecodeError, OSError, TypeError, AttributeError):
+            pass
+    return 'Postfix Admin'
+
+
 @app.context_processor
 def inject_year():
-    return {'current_year': datetime.now().year}
+    return {'current_year': datetime.now().year, 'company_name': load_company_name()}
 
 # --- IP Whitelist Management (без изменений) ---
 def load_ip_whitelist():
@@ -152,6 +179,157 @@ def sync_nginx_ip_whitelist():
     if reload.returncode != 0:
         return False, (reload.stderr or reload.stdout or 'nginx reload failed').strip()
     return True, None
+
+
+def _openssl(args, data=None):
+    try:
+        return subprocess.run(
+            ['openssl'] + args,
+            input=data,
+            capture_output=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        class _Missing:
+            returncode = 1
+            stdout = b''
+            stderr = b'openssl not found'
+        return _Missing()
+
+
+def tls_cert_info(path=TLS_CERT_FILE):
+    info = {
+        'present': False,
+        'subject': '',
+        'issuer': '',
+        'not_before': '',
+        'not_after': '',
+        'path_cert': TLS_CERT_FILE,
+        'path_key': TLS_KEY_FILE,
+    }
+    if not os.path.isfile(path):
+        return info
+    result = _openssl(['x509', '-in', path, '-noout', '-subject', '-issuer', '-dates'])
+    if result.returncode != 0:
+        info['present'] = True
+        info['subject'] = 'не удалось прочитать сертификат'
+        return info
+    info['present'] = True
+    for line in (result.stdout or b'').decode('utf-8', errors='replace').splitlines():
+        if line.startswith('subject='):
+            info['subject'] = line[8:].strip()
+        elif line.startswith('issuer='):
+            info['issuer'] = line[7:].strip()
+        elif line.startswith('notBefore='):
+            info['not_before'] = line.split('=', 1)[1].strip()
+        elif line.startswith('notAfter='):
+            info['not_after'] = line.split('=', 1)[1].strip()
+    return info
+
+
+def _read_tls_upload(storage, label):
+    if not storage or not storage.filename:
+        return None, f'Не выбран файл: {label}'
+    data = storage.read(MAX_TLS_UPLOAD + 1)
+    if len(data) > MAX_TLS_UPLOAD:
+        return None, f'{label}: файл больше {MAX_TLS_UPLOAD} байт'
+    if not data.strip():
+        return None, f'{label}: пустой файл'
+    return data, None
+
+
+def _parse_tls_pem(cert_raw, key_raw, chain_raw):
+    if b'ENCRYPTED PRIVATE KEY' in key_raw:
+        return None, None, 'Ключ зашифрован паролем — нужен PEM без passphrase'
+    keys = _PEM_KEY_RE.findall(key_raw)
+    if len(keys) != 1:
+        return None, None, 'В файле ключа должен быть ровно один блок PRIVATE KEY (не encrypted)'
+    certs = _PEM_CERT_RE.findall(cert_raw)
+    if not certs:
+        return None, None, 'В файле сертификата нет блока BEGIN CERTIFICATE'
+    if chain_raw:
+        certs.extend(_PEM_CERT_RE.findall(chain_raw))
+    fullchain = b'\n'.join(certs) + b'\n'
+    key_pem = keys[0] + b'\n'
+    return fullchain, key_pem, None
+
+
+def _tls_key_matches_cert(fullchain, key_pem):
+    first_cert = _PEM_CERT_RE.search(fullchain)
+    if not first_cert:
+        return False, 'Нет листового сертификата'
+    tmp = tempfile.mkdtemp(prefix='pfa-tls-')
+    try:
+        os.chmod(tmp, 0o700)
+        cert_path = os.path.join(tmp, 'leaf.pem')
+        key_path = os.path.join(tmp, 'key.pem')
+        with open(cert_path, 'wb') as f:
+            f.write(first_cert.group(0) + b'\n')
+        with open(key_path, 'wb') as f:
+            f.write(key_pem)
+        os.chmod(key_path, 0o600)
+        leaf = _openssl(['x509', '-in', cert_path, '-noout'])
+        if leaf.returncode != 0:
+            return False, (leaf.stderr or leaf.stdout or b'openssl x509 failed').decode('utf-8', errors='replace').strip()
+        pub_cert = _openssl(['x509', '-in', cert_path, '-noout', '-pubkey'])
+        pub_key = _openssl(['pkey', '-in', key_path, '-pubout'])
+        if pub_cert.returncode != 0 or pub_key.returncode != 0:
+            return False, 'openssl не смог извлечь публичный ключ (проверьте PEM ключа и сертификата)'
+        if pub_cert.stdout != pub_key.stdout:
+            return False, 'Ключ не соответствует сертификату'
+        return True, None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _restore_tls_pair(crt_bak, key_bak):
+    if os.path.isfile(crt_bak):
+        shutil.copy2(crt_bak, TLS_CERT_FILE)
+        os.chmod(TLS_CERT_FILE, 0o644)
+    if os.path.isfile(key_bak):
+        shutil.copy2(key_bak, TLS_KEY_FILE)
+        os.chmod(TLS_KEY_FILE, 0o600)
+
+
+def install_panel_tls(fullchain, key_pem):
+    os.makedirs('/etc/nginx/ssl', mode=0o755, exist_ok=True)
+    crt_bak = TLS_CERT_FILE + '.bak'
+    key_bak = TLS_KEY_FILE + '.bak'
+    if os.path.isfile(TLS_CERT_FILE):
+        shutil.copy2(TLS_CERT_FILE, crt_bak)
+    if os.path.isfile(TLS_KEY_FILE):
+        shutil.copy2(TLS_KEY_FILE, key_bak)
+    tmp_crt = TLS_CERT_FILE + '.new'
+    tmp_key = TLS_KEY_FILE + '.new'
+    try:
+        with open(tmp_crt, 'wb') as f:
+            f.write(fullchain)
+        with open(tmp_key, 'wb') as f:
+            f.write(key_pem)
+        os.chmod(tmp_crt, 0o644)
+        os.chmod(tmp_key, 0o600)
+        os.replace(tmp_crt, TLS_CERT_FILE)
+        os.replace(tmp_key, TLS_KEY_FILE)
+        test = subprocess.run(['nginx', '-t'], capture_output=True, text=True, timeout=10)
+        if test.returncode != 0:
+            _restore_tls_pair(crt_bak, key_bak)
+            return False, (test.stderr or test.stdout or 'nginx -t failed').strip()
+        reload = subprocess.run(
+            ['systemctl', 'reload', 'nginx'], capture_output=True, text=True, timeout=15
+        )
+        if reload.returncode != 0:
+            _restore_tls_pair(crt_bak, key_bak)
+            subprocess.run(['nginx', '-t'], capture_output=True, timeout=10)
+            subprocess.run(['systemctl', 'reload', 'nginx'], capture_output=True, timeout=15)
+            return False, (reload.stderr or reload.stdout or 'nginx reload failed').strip()
+        return True, None
+    except OSError as e:
+        _restore_tls_pair(crt_bak, key_bak)
+        for leftover in (tmp_crt, tmp_key):
+            if os.path.isfile(leftover):
+                os.remove(leftover)
+        return False, str(e)
+
 
 def is_ip_allowed(ip_str):
     whitelist = load_ip_whitelist()
@@ -1346,7 +1524,43 @@ def main_config():
         config_params=IMPORTANT_PARAMS,
         routing_mode=routing_mode,
         routing_map=routing_map,
+        tls_info=tls_cert_info() if current_user.role == 'admin' else None,
     )
+
+
+@app.route('/config/tls', methods=['POST'])
+@login_required
+@admin_required
+def upload_panel_tls():
+    cert_raw, err = _read_tls_upload(request.files.get('tls_cert'), 'сертификат')
+    if err:
+        flash(err, 'danger')
+        return redirect(url_for('main_config'))
+    key_raw, err = _read_tls_upload(request.files.get('tls_key'), 'ключ')
+    if err:
+        flash(err, 'danger')
+        return redirect(url_for('main_config'))
+    chain_file = request.files.get('tls_chain')
+    chain_raw = None
+    if chain_file and chain_file.filename:
+        chain_raw, err = _read_tls_upload(chain_file, 'цепочка')
+        if err:
+            flash(err, 'danger')
+            return redirect(url_for('main_config'))
+    fullchain, key_pem, err = _parse_tls_pem(cert_raw, key_raw, chain_raw)
+    if err:
+        flash(err, 'danger')
+        return redirect(url_for('main_config'))
+    ok, err = _tls_key_matches_cert(fullchain, key_pem)
+    if not ok:
+        flash(err, 'danger')
+        return redirect(url_for('main_config'))
+    ok, err = install_panel_tls(fullchain, key_pem)
+    if ok:
+        flash('TLS сертификат панели заменён, Nginx перезагружен', 'success')
+    else:
+        flash(f'Сертификат не применён: {err}', 'danger')
+    return redirect(url_for('main_config'))
 
 @app.route('/config/save', methods=['POST'])
 @login_required
@@ -2027,9 +2241,10 @@ def not_found(e):
 def server_error(e):
     return render_error_page('Внутренняя ошибка сервера', 500)
 
-@app.errorhandler(403)
-def forbidden(e):
-    return render_error_page('Доступ запрещён', 403)
+@app.errorhandler(413)
+def too_large(e):
+    flash('Файл слишком большой (лимит 1 МБ)', 'danger')
+    return redirect(url_for('main_config'))
 
 if __name__ == '__main__':
     if not os.path.exists(USERS_FILE):

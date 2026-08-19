@@ -25,7 +25,7 @@ MAIN_CF="/etc/postfix/main.cf"
 TLS_CERT="/etc/nginx/ssl/postfix-admin.crt"
 TLS_KEY="/etc/nginx/ssl/postfix-admin.key"
 SERVICE_FILE="/etc/systemd/system/postfix-admin.service"
-VENV_DIR="$INSTALL_DIR/venv"
+BRAND_FILE="$INSTALL_DIR/brand.json"
 VENV_PIP="$VENV_DIR/bin/pip"
 VENV_GUNICORN="$VENV_DIR/bin/gunicorn"
 VENV_FLASK="$VENV_DIR/bin/flask"
@@ -107,6 +107,46 @@ EOF
     fi
     chown "$owner" "$file"
     chmod 644 "$file"
+}
+
+read_brand_company() {
+    if [ -f "$BRAND_FILE" ]; then
+        python3 -c "import json; print(json.load(open(r'''$BRAND_FILE''')).get('company_name',''))" 2>/dev/null || true
+    fi
+}
+
+prompt_company_name() {
+    local current
+    current="$(read_brand_company | tr -d '\r')"
+    echo -e "\n${GREEN}Company name (sidebar, login, footer, TLS O=)...${NC}"
+    if [ -n "$current" ]; then
+        echo -e "Current: ${YELLOW}${current}${NC}"
+        read -p "Keep this name? (Y/n): " KEEP_BRAND
+        if [[ ! "$KEEP_BRAND" =~ ^[Nn]$ ]]; then
+            COMPANY_NAME="$current"
+            return 0
+        fi
+    fi
+    read -p "Company name [Postfix Admin]: " COMPANY_NAME
+    COMPANY_NAME="$(printf '%s' "$COMPANY_NAME" | tr -d '\r')"
+    if [ -z "$COMPANY_NAME" ]; then
+        COMPANY_NAME="Postfix Admin"
+    fi
+}
+
+write_brand_file() {
+    BRAND_FILE="$BRAND_FILE" COMPANY_NAME="$COMPANY_NAME" python3 - <<'PY'
+import json, os, re
+name = os.environ.get("COMPANY_NAME", "").strip()
+name = re.sub(r"[\x00-\x1f]", "", name)[:80]
+if not name:
+    name = "Postfix Admin"
+path = os.environ["BRAND_FILE"]
+with open(path, "w", encoding="utf-8") as f:
+    json.dump({"company_name": name}, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+print(name)
+PY
 }
 
 get_existing_secret_key() {
@@ -206,6 +246,14 @@ cp "$REPO_ROOT/deploy/postfix-admin.service" "$INSTALL_DIR/deploy/"
 cp "$REPO_ROOT/deploy/install.sh" "$INSTALL_DIR/deploy/"
 cp "$REPO_ROOT/deploy/uninstall.sh" "$INSTALL_DIR/deploy/"
 cp "$REPO_ROOT/deploy/update.sh" "$INSTALL_DIR/deploy/" 2>/dev/null || true
+
+prompt_company_name
+export BRAND_FILE
+export COMPANY_NAME
+COMPANY_NAME="$(write_brand_file)"
+chmod 644 "$BRAND_FILE"
+echo -e "${GREEN}Company name: ${COMPANY_NAME}${NC}"
+
 setup_python_env
 
 echo -e "\n${GREEN}Checking Postfix sender routing files...${NC}"
@@ -231,7 +279,7 @@ else
     openssl req -x509 -nodes -days 3650 -newkey rsa:4096 \
         -keyout "$TLS_KEY" \
         -out "$TLS_CERT" \
-        -subj "/C=RU/ST=Moscow/L=Moscow/O=InterROS/CN=$(hostname -I | awk '{print $1}')"
+        -subj "/C=RU/ST=Moscow/L=Moscow/O=$(printf '%s' "$COMPANY_NAME" | tr -d '/\\')/CN=$(hostname -I | awk '{print $1}')"
 fi
 
 chmod 600 "$TLS_KEY"
@@ -367,6 +415,7 @@ fi
 echo -e "\n${GREEN}=========================================${NC}"
 echo -e "${GREEN}Installation complete!${NC}"
 echo -e "${GREEN}=========================================${NC}"
+echo -e "Company: ${YELLOW}${COMPANY_NAME}${NC}"
 echo -e "Access: ${YELLOW}https://$(hostname -I | awk '{print $1}')${NC}"
 echo -e "Sender routing map: ${YELLOW}${ROUTING_MAP:-$SENDER_MAP}${NC}"
 echo -e "Panel reads existing ${YELLOW}main.cf${NC} — map files are not overwritten if already present."
