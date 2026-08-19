@@ -21,43 +21,46 @@ Mood: night NOC, not marketing site. Login is a compact card, not a hero.
 
 | Token | Hex | Role |
 |---|---|---|
-| canvas | `#0b1220` | Page, topbar, footer |
-| surface-1 | `#111827` | Cards, sidebar, table body |
-| surface-2 | `#0f172a` | Inputs, hover, striped rows |
-| hairline | `rgba(148,163,184,0.18)` | Card and table borders |
-| ink | `#f8fafc` | Titles, primary text |
-| ink-muted | `#94a3b8` | Labels, secondary, raw logs |
-| accent | `#4cc9d8` | InterROS teal — CTA, focus, nav, links |
-| accent-hover | `#3db8c7` | Primary hover |
-| danger | `#c45c5c` | Destructive — muted, not Bootstrap `#dc3545` |
+| canvas | `#1a1a18` | Page, topbar, footer |
+| surface-1 | `#242422` | Cards, sidebar, table body |
+| surface-2 | `#1f1f1d` | Inputs |
+| nav-item | `#2e2e2b` | Hover wash, secondary buttons |
+| hairline | `#3d3d38` | Borders |
+| ink | `#ecece6` | Titles |
+| ink-body | `#c4c4be` | Body |
+| ink-muted | `#8e8e86` | Labels, destructive outline |
+| accent | `#3db8c6` | InterROS teal (из `c:\code\PostfixAdmin`) |
+| accent-hover | `#5cc8d4` | Primary hover |
+| accent-2 | `#cfcf2a` | Warning only |
 
 ### Light
 
 | Token | Hex |
 |---|---|
-| canvas | `#f4f5f7` |
+| canvas | `#f3f3ef` |
 | surface-1 | `#ffffff` |
-| surface-2 | `#eef0f3` |
-| ink | `#0b0c0f` |
-| ink-muted | `#3b3d45` |
-| hairline | `rgba(15,23,42,0.14)` |
-| accent | `#0e8f94` |
+| surface-2 | `#ecece6` |
+| ink | `#1a1a18` |
+| ink-muted | `#5a5a54` |
+| hairline | `#d0d0c8` |
+| accent | `#3db8c6` |
 
 Never: Bootstrap default blue (`#0d6efd`) or red (`#dc3545`); Google Fonts / any render-blocking CDN; HashiCorp product accents.
 
 ## 3. Typography Rules
 
-Local stack only (no webfonts): `"Segoe UI", system-ui, sans-serif`. Mono: `ui-monospace`, Cascadia, Consolas.
+Local stack: `"PT Sans", "Segoe UI", Helvetica, Arial` (woff2 в исходнике нет — без CDN). Mono: `ui-monospace`. html 16px, body 400 / line-height 1.45.
 
-- Page title: 22–28px, weight 600, tracking −0.4px, ink
-- Body / table: 14–16px, weight 500, line-height 1.5
-- Nav / eyebrow: 12px, weight 600, letter-spacing 0.06em, uppercase, ink-subtle
-- Raw log cell: 12.5px mono, ink-muted, wrap (`pre-wrap` + `overflow-wrap: anywhere`)
-- Login heading: 20px, weight 600, not all-caps mega title
+- Page title: 1.75rem / 700
+- Body / table: 1.05rem
+- Nav links: 1.125rem; sections 0.8rem uppercase
+- Buttons: 0.95rem / 700 / uppercase / letter-spacing 0.03em; sm 0.875rem
+- Labels: 0.875rem uppercase
+- Login heading: 1.25rem / 700 / uppercase
 
 ## 4. Component Stylings
 
-- **Buttons:** radius 8px. Primary = accent fill, white text. Secondary = surface-2, ink text. Danger = danger fill.
+- **Buttons:** radius 8px. Primary/success/info = `#3db8c6` + white. Outline-primary fill on hover. Secondary = `#2e2e2b`. Warning = `#cfcf2a`. Danger = muted outline (`#5a5a54` / `#8e8e86`), not Bootstrap red.
 - **Cards:** surface-1, 12px radius, 1px hairline, no heavy shadow.
 - **Inputs:** surface-2, 8px radius, ink text, hairline border; focus ring 2px accent at 35% opacity.
 - **Sidebar:** surface-1, active link = accent text + 12% accent wash. Logo 40px in nav, 64px on login (not full-card).

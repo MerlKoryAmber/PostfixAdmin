@@ -224,7 +224,7 @@ venv/node_modules, большие логи). Работать в scratchpad-ка
 - Владелец: Merl. Язык ответов и коммит-сообщений (после типа): русский.
 - Стек: Flask 3, без БД; файлы `/etc/postfix`, `/var/log/maillog`; Nginx HTTPS;
   Gunicorn из venv `/opt/postfix-admin/venv`; юнит `postfix-admin.service`.
-- UI: `DESIGN.md` + `static/style.css` + `templates/`. Акцент InterROS `#4cc9d8`.
+- UI: `DESIGN.md` + `static/style.css` + `templates/`. Акцент InterROS `#3db8c6` (эталон `c:\code\PostfixAdmin`). Не копировать оттуда `max-width` контейнеров.
   Без Google Fonts / CDN. Bootstrap `btn-outline-primary` / `btn-danger` —
   перекрывать токенами, не оставлять `#0d6efd` / `#dc3545`.
 - Деплой: `deploy/install.sh`, `update.sh`, `uninstall.sh`. На хост класть
