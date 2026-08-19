@@ -1,28 +1,28 @@
 {% extends "base.html" %}
 
-{% block title %}Mail Queue{% endblock %}
+{% block title %}Очередь писем{% endblock %}
 
 {% block content %}
 <div class="page-header">
     <div>
-        <h1 class="page-title">Mail Queue</h1>
+        <h1 class="page-title">Очередь писем</h1>
     </div>
     {% if current_user.role == 'admin' %}
     <div class="d-flex flex-wrap gap-2">
-        <form method="POST" action="{{ url_for('flush_queue') }}" style="display:inline;">
+        <form method="POST" action="{{ url_for('flush_queue') }}" style="display:inline;"
+              data-ajax data-ajax-reload data-confirm="Отправить всю очередь (flush)?">
             {% include '_csrf.html' %}
-            <button type="submit" class="btn btn-outline-secondary btn-sm"
-                    onclick="return confirm('Flush entire queue?')">Flush All</button>
+            <button type="submit" class="btn btn-outline-secondary btn-sm">Отправить всё</button>
         </form>
-        <form method="POST" action="{{ url_for('delete_all_queue') }}" style="display:inline;">
+        <form method="POST" action="{{ url_for('delete_all_queue') }}" style="display:inline;"
+              data-ajax data-ajax-reload data-confirm="Удалить ВСЕ письма из очереди? Действие необратимо.">
             {% include '_csrf.html' %}
-            <button type="submit" class="btn btn-outline-danger btn-sm"
-                    onclick="return confirm('Delete ALL messages? Active deliveries preserved.')">Delete All</button>
+            <button type="submit" class="btn btn-outline-danger btn-sm">Удалить всё</button>
         </form>
-        <form method="POST" action="{{ url_for('delete_deferred') }}" style="display:inline;">
+        <form method="POST" action="{{ url_for('delete_deferred') }}" style="display:inline;"
+              data-ajax data-ajax-reload data-confirm="Удалить все отложенные (deferred) письма?">
             {% include '_csrf.html' %}
-            <button type="submit" class="btn btn-outline-danger btn-sm"
-                    onclick="return confirm('Delete all deferred messages?')">Delete Deferred</button>
+            <button type="submit" class="btn btn-outline-danger btn-sm">Удалить deferred</button>
         </form>
     </div>
     {% endif %}
@@ -33,7 +33,7 @@
         <div class="card metric-card">
             <div class="card-body text-center">
                 <div class="metric-value">{{ stats.total }}</div>
-                <div class="metric-label">Total</div>
+                <div class="metric-label">Всего</div>
             </div>
         </div>
     </div>
@@ -41,7 +41,7 @@
         <div class="card metric-card">
             <div class="card-body text-center">
                 <div class="metric-value">{{ stats.active }}</div>
-                <div class="metric-label">Active</div>
+                <div class="metric-label">Активные</div>
             </div>
         </div>
     </div>
@@ -49,7 +49,7 @@
         <div class="card metric-card">
             <div class="card-body text-center">
                 <div class="metric-value">{{ stats.deferred }}</div>
-                <div class="metric-label">Deferred</div>
+                <div class="metric-label">Отложенные</div>
             </div>
         </div>
     </div>
@@ -57,42 +57,44 @@
         <div class="card metric-card">
             <div class="card-body text-center">
                 <div class="metric-value">{{ stats.hold }}</div>
-                <div class="metric-label">On Hold</div>
+                <div class="metric-label">На hold</div>
             </div>
         </div>
     </div>
 </div>
 
-{% if current_user.role == 'admin' and entries|length > 0 %}
+{% if current_user.role == 'admin' and total > 0 %}
 <div class="card mb-4">
-    <div class="card-header">Bulk Operations</div>
+    <div class="card-header">Массовые операции</div>
     <div class="card-body">
         <div class="row g-3">
             <div class="col-md-6">
-                <form method="POST" action="{{ url_for('delete_by_sender') }}" class="row g-2 align-items-end">
+                <form method="POST" action="{{ url_for('delete_by_sender') }}" class="row g-2 align-items-end"
+                      data-ajax data-ajax-reload
+                      data-confirm="Удалить все письма этого отправителя? Точное совпадение адреса.">
                     {% include '_csrf.html' %}
                     <div class="col">
-                        <label class="form-label">Delete by sender</label>
+                        <label class="form-label">Удалить по отправителю</label>
                         <input type="text" name="sender" class="form-control form-control-sm"
                                placeholder="sender@domain.com" required>
                     </div>
                     <div class="col-auto">
-                        <button type="submit" class="btn btn-outline-danger btn-sm"
-                                onclick="return confirm('Delete all messages from this sender?')">Delete</button>
+                        <button type="submit" class="btn btn-outline-danger btn-sm">Удалить</button>
                     </div>
                 </form>
             </div>
             <div class="col-md-6">
-                <form method="POST" action="{{ url_for('delete_by_domain') }}" class="row g-2 align-items-end">
+                <form method="POST" action="{{ url_for('delete_by_domain') }}" class="row g-2 align-items-end"
+                      data-ajax data-ajax-reload
+                      data-confirm="Удалить все письма этого домена отправителя?">
                     {% include '_csrf.html' %}
                     <div class="col">
-                        <label class="form-label">Delete by domain</label>
+                        <label class="form-label">Удалить по домену</label>
                         <input type="text" name="domain" class="form-control form-control-sm"
                                placeholder="domain.com" required>
                     </div>
                     <div class="col-auto">
-                        <button type="submit" class="btn btn-outline-danger btn-sm"
-                                onclick="return confirm('Delete all messages for this domain?')">Delete</button>
+                        <button type="submit" class="btn btn-outline-danger btn-sm">Удалить</button>
                     </div>
                 </form>
             </div>
@@ -102,23 +104,34 @@
 {% endif %}
 
 <div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Messages in queue</span>
-        <small class="text-muted">Total: {{ entries|length }}</small>
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span>Письма в очереди</span>
+        <form method="GET" action="{{ url_for('view_queue') }}" class="d-flex gap-2 align-items-center">
+            <input type="search" name="q" value="{{ q }}" class="form-control form-control-sm"
+                   placeholder="Поиск: ID, отправитель, получатель…" style="min-width: 260px;">
+            <select name="per_page" class="form-select form-select-sm" style="width: auto;"
+                    onchange="this.form.submit()">
+                {% for n in [25, 50, 100, 200] %}
+                <option value="{{ n }}" {% if per_page == n %}selected{% endif %}>{{ n }} / стр.</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-outline-secondary btn-sm">Найти</button>
+        </form>
+        <small class="text-muted">Всего: {{ total }}</small>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover mb-0">
+            <table class="table table-hover mb-0" id="queueTable">
                 <thead>
                     <tr>
                         <th>ID</th>
-                        <th>Size</th>
-                        <th>Arrival</th>
-                        <th>Sender</th>
-                        <th>Recipient</th>
-                        <th>Status</th>
+                        <th>Размер</th>
+                        <th>Прибыло</th>
+                        <th>Отправитель</th>
+                        <th>Получатель</th>
+                        <th>Статус</th>
                         {% if current_user.role == 'admin' %}
-                        <th>Actions</th>
+                        <th>Действия</th>
                         {% endif %}
                     </tr>
                 </thead>
@@ -133,62 +146,96 @@
                         <td>{{ entry.size }}</td>
                         <td><small>{{ entry.arrival_time }}</small></td>
                         <td><small>{{ entry.sender }}</small></td>
-                        <td><small>{{ entry.recipient }}</small></td>
+                        <td>
+                            <small>{{ entry.recipient }}</small>
+                            {% if entry.recipient_count > 1 %}
+                            <span class="badge badge-status-neutral" title="{{ entry.recipients|join('\n') }}">+{{ entry.recipient_count - 1 }}</span>
+                            {% endif %}
+                        </td>
                         <td>
                             {% if 'active' in entry.status.lower() %}
                                 <span class="badge badge-status-ok">active</span>
-                            {% elif 'deferred' in entry.status.lower() %}
-                                <span class="badge badge-status-neutral">deferred</span>
                             {% elif 'hold' in entry.status.lower() %}
                                 <span class="badge badge-status-off">hold</span>
                             {% else %}
-                                <small>{{ entry.status }}</small>
+                                <span class="badge badge-status-neutral">deferred</span>
                             {% endif %}
+                            {% if entry.reason %}<small class="text-muted d-block">{{ entry.reason[:60] }}</small>{% endif %}
                         </td>
                         {% if current_user.role == 'admin' %}
                         <td>
                             <div class="d-flex flex-wrap gap-1">
                                 <a href="{{ url_for('view_message_detail', queue_id=entry.queue_id) }}"
-                                   class="btn btn-outline-secondary btn-sm">View</a>
-                                <form method="POST" action="{{ url_for('requeue_message', queue_id=entry.queue_id) }}" style="display:inline;">
+                                   class="btn btn-outline-secondary btn-sm">Открыть</a>
+                                <form method="POST" action="{{ url_for('requeue_message', queue_id=entry.queue_id) }}"
+                                      style="display:inline;" data-ajax data-ajax-reload>
                                     {% include '_csrf.html' %}
                                     <button type="submit" class="btn btn-outline-secondary btn-sm">Requeue</button>
                                 </form>
                                 {% if 'hold' in entry.status.lower() %}
-                                <form method="POST" action="{{ url_for('release_message', queue_id=entry.queue_id) }}" style="display:inline;">
+                                <form method="POST" action="{{ url_for('release_message', queue_id=entry.queue_id) }}"
+                                      style="display:inline;" data-ajax data-ajax-reload>
                                     {% include '_csrf.html' %}
-                                    <button type="submit" class="btn btn-outline-secondary btn-sm">Release</button>
+                                    <button type="submit" class="btn btn-outline-secondary btn-sm">Снять hold</button>
                                 </form>
                                 {% else %}
-                                <form method="POST" action="{{ url_for('hold_message', queue_id=entry.queue_id) }}" style="display:inline;">
+                                <form method="POST" action="{{ url_for('hold_message', queue_id=entry.queue_id) }}"
+                                      style="display:inline;" data-ajax data-ajax-reload>
                                     {% include '_csrf.html' %}
                                     <button type="submit" class="btn btn-outline-secondary btn-sm">Hold</button>
                                 </form>
                                 {% endif %}
-                                <form method="POST" action="{{ url_for('delete_queue_message', queue_id=entry.queue_id) }}" style="display:inline;">
+                                <form method="POST" action="{{ url_for('delete_queue_message', queue_id=entry.queue_id) }}"
+                                      style="display:inline;" data-ajax data-ajax-remove-row
+                                      data-confirm="Удалить письмо {{ entry.queue_id }}?">
                                     {% include '_csrf.html' %}
-                                    <button type="submit" class="btn btn-outline-danger btn-sm"
-                                            onclick="return confirm('Delete {{ entry.queue_id }}?')">Delete</button>
+                                    <button type="submit" class="btn btn-outline-danger btn-sm">Удалить</button>
                                 </form>
                             </div>
                         </td>
                         {% endif %}
                     </tr>
                     {% else %}
-                    <tr>
+                    <tr data-empty-row>
                         <td colspan="{% if current_user.role == 'admin' %}7{% else %}6{% endif %}"
-                            class="text-center text-muted py-5">Mail queue is empty</td>
+                            class="text-center text-muted py-5">
+                            {% if q %}Ничего не найдено по запросу «{{ q }}»{% else %}Очередь пуста{% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
     </div>
+    {% if pages > 1 %}
+    <div class="card-footer d-flex justify-content-between align-items-center">
+        <small class="text-muted">Страница {{ page }} из {{ pages }}</small>
+        <nav>
+            <ul class="pagination pagination-sm mb-0">
+                <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('view_queue', q=q, per_page=per_page, page=page-1) }}">←</a>
+                </li>
+                {% for p in range(1, pages + 1) %}
+                    {% if p == 1 or p == pages or (p >= page - 2 and p <= page + 2) %}
+                    <li class="page-item {% if p == page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('view_queue', q=q, per_page=per_page, page=p) }}">{{ p }}</a>
+                    </li>
+                    {% elif p == page - 3 or p == page + 3 %}
+                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                <li class="page-item {% if page >= pages %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('view_queue', q=q, per_page=per_page, page=page+1) }}">→</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-setTimeout(function() { location.reload(); }, 15000);
+document.body.setAttribute('data-autorefresh', '15');
 </script>
 {% endblock %}

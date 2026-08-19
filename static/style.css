@@ -732,6 +732,14 @@ pre {
     color: var(--text-muted);
 }
 
+.side-link-button {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+
 .sidebar-nav {
     flex: 1;
 }
@@ -903,4 +911,138 @@ pre {
     .topbar {
         display: flex;
     }
+}
+
+/* ===== UX layer: toasts, confirm modal, light theme, misc ===== */
+
+/* Светлая тема (по умолчанию — тёмная) */
+:root[data-theme="light"] {
+    --bg-page: #f4f4f0;
+    --bg-card: #ffffff;
+    --bg-muted: #ececea;
+    --bg-nav-item: #e3e3df;
+    --border: #d7d7d0;
+    --border-dark: #b8b8ae;
+    --text: #3c3c38;
+    --text-dark: #1c1c1a;
+    --text-muted: #7a7a72;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
+    --shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+}
+:root[data-theme="light"] .sidebar,
+:root[data-theme="light"] .topbar {
+    background: var(--bg-card);
+    border-color: var(--border);
+}
+:root[data-theme="light"] .table {
+    --bs-table-bg: transparent;
+    --bs-table-color: var(--text);
+    --bs-table-border-color: var(--border);
+    --bs-table-hover-bg: rgba(61, 184, 198, 0.07);
+    color: var(--text);
+}
+
+/* Toast-уведомления */
+.toast-stack {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 1080;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: min(420px, calc(100vw - 32px));
+}
+.app-toast {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left-width: 4px;
+    box-shadow: var(--shadow);
+    color: var(--text-dark);
+    font-size: 0.9rem;
+    opacity: 0;
+    transform: translateX(24px);
+    transition: opacity .3s ease, transform .3s ease;
+}
+.app-toast.show { opacity: 1; transform: translateX(0); }
+.app-toast .toast-text { flex: 1; white-space: pre-wrap; word-break: break-word; }
+.app-toast .toast-close {
+    background: none; border: 0; color: var(--text-muted);
+    font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0 2px;
+}
+.app-toast .toast-close:hover { color: var(--text-dark); }
+.app-toast .toast-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex: none; }
+.toast-success { border-left-color: #4caf7d; }
+.toast-success .toast-dot { background: #4caf7d; }
+.toast-danger { border-left-color: #e05d5d; }
+.toast-danger .toast-dot { background: #e05d5d; }
+.toast-warning { border-left-color: #d9a62e; }
+.toast-warning .toast-dot { background: #d9a62e; }
+.toast-info { border-left-color: var(--brand-primary); }
+.toast-info .toast-dot { background: var(--brand-primary); }
+
+/* Модальное подтверждение */
+.confirm-modal {
+    background: var(--bg-card);
+    color: var(--text-dark);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.confirm-modal .modal-header,
+.confirm-modal .modal-footer { border-color: var(--border); }
+
+/* Кнопка-«спиннер» во время AJAX */
+.btn-busy { opacity: .65; pointer-events: none; position: relative; }
+.btn-busy::after {
+    content: '';
+    display: inline-block;
+    width: .8em; height: .8em;
+    margin-left: .5em;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    vertical-align: -0.1em;
+    animation: pfa-spin .7s linear infinite;
+}
+@keyframes pfa-spin { to { transform: rotate(360deg); } }
+
+/* Анимация удаления строки */
+tr.row-removing { opacity: 0; transition: opacity .35s ease; }
+tr.row-removing td { background: rgba(224, 93, 93, 0.08); }
+
+/* Переключатель темы */
+.topbar-spacer { flex: 1; }
+.theme-toggle {
+    background: var(--bg-nav-item);
+    border: 1px solid var(--border);
+    color: var(--text-dark);
+    border-radius: var(--radius-sm);
+    width: 34px; height: 34px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background .2s;
+}
+.theme-toggle:hover { background: var(--border); }
+
+/* Пагинация в фирменных цветах */
+.pagination .page-link {
+    background: var(--bg-card);
+    border-color: var(--border);
+    color: var(--text);
+}
+.pagination .page-link:hover { background: var(--bg-muted); color: var(--text-dark); }
+.pagination .page-item.active .page-link {
+    background: var(--brand-primary);
+    border-color: var(--brand-primary);
+    color: #0c2325;
+}
+.pagination .page-item.disabled .page-link {
+    background: var(--bg-muted);
+    border-color: var(--border);
+    color: var(--text-muted);
 }

@@ -55,7 +55,7 @@
                     </div>
                 </div>
 
-                <form method="POST" action="{{ url_for('check_host') }}" style="display:inline;">
+                <form method="POST" data-ajax action="{{ url_for('check_host') }}" style="display:inline;">
                     {% include '_csrf.html' %}
                     <input type="hidden" name="transport" value="{{ host.transport }}">
                     <button type="submit" class="btn btn-outline-secondary btn-sm">Check Again</button>

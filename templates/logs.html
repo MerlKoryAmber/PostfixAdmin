@@ -1,48 +1,48 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2 class="page-title mb-4">Mail Server Logs</h2>
+<h2 class="page-title mb-4">Логи почтового сервера</h2>
 
 <!-- Фильтры -->
 <div class="card mb-3">
     <div class="card-body">
         <form method="GET" class="row g-3">
             <div class="col-md-2">
-                <label for="from" class="form-label">From</label>
+                <label for="from" class="form-label">От кого</label>
                 <input type="text" class="form-control" id="from" name="from" 
                        placeholder="sender@domain" value="{{ from_filter }}">
             </div>
             <div class="col-md-2">
-                <label for="to" class="form-label">To</label>
+                <label for="to" class="form-label">Кому</label>
                 <input type="text" class="form-control" id="to" name="to" 
                        placeholder="recipient@domain" value="{{ to_filter }}">
             </div>
             <div class="col-md-2">
-                <label for="status" class="form-label">Status</label>
+                <label for="status" class="form-label">Статус</label>
                 <input type="text" class="form-control" id="status" name="status" 
                        placeholder="sent, deferred..." value="{{ status_filter }}">
             </div>
             <div class="col-md-2">
-                <label for="relay" class="form-label">Relay</label>
+                <label for="relay" class="form-label">Релей</label>
                 <input type="text" class="form-control" id="relay" name="relay" 
                        placeholder="hostname" value="{{ relay_filter }}">
             </div>
             <div class="col-md-2">
-                <label for="search" class="form-label">Text search</label>
+                <label for="search" class="form-label">Поиск по тексту</label>
                 <input type="text" class="form-control" id="search" name="search" 
                        placeholder="any text" value="{{ search }}">
             </div>
             <div class="col-md-2">
-                <label for="filter" class="form-label">Log type</label>
+                <label for="filter" class="form-label">Тип записей</label>
                 <select class="form-select" id="filter" name="filter">
-                    <option value="all" {% if filter_type == 'all' %}selected{% endif %}>All entries</option>
-                    <option value="postfix" {% if filter_type == 'postfix' %}selected{% endif %}>Postfix only</option>
-                    <option value="errors" {% if filter_type == 'errors' %}selected{% endif %}>Errors only</option>
+                    <option value="all" {% if filter_type == 'all' %}selected{% endif %}>Все записи</option>
+                    <option value="postfix" {% if filter_type == 'postfix' %}selected{% endif %}>Только Postfix</option>
+                    <option value="errors" {% if filter_type == 'errors' %}selected{% endif %}>Только ошибки</option>
                 </select>
             </div>
             <div class="col-12">
-                <button type="submit" class="btn btn-primary">Apply Filters</button>
-                <a href="{{ url_for('view_logs') }}" class="btn btn-secondary">Clear</a>
+                <button type="submit" class="btn btn-primary">Применить</button>
+                <a href="{{ url_for('view_logs') }}" class="btn btn-secondary">Сбросить</a>
             </div>
         </form>
     </div>
@@ -50,13 +50,16 @@
 
 <!-- Таблица логов -->
 <div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Log file: /var/log/maillog</span>
-        <small class="text-muted">Showing {{ logs|length }} entries</small>
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span>Файл: /var/log/maillog</span>
+        <input type="search" class="form-control form-control-sm" style="max-width: 260px;"
+               placeholder="Живой фильтр по показанным…"
+               data-filter-table="#logsTable">
+        <small class="text-muted">Показано записей: {{ logs|length }}</small>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover table-striped mb-0">
+            <table class="table table-hover table-striped mb-0" id="logsTable">
                 <thead>
                     <tr>
                         <th style="width: 120px;">Time</th>

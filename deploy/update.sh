@@ -18,6 +18,8 @@ APP_GROUP="postfixadmin"
 BACKUP_DIR="/opt/postfix-admin-backup-$(date +%Y%m%d-%H%M%S)"
 GITHUB_REPO="https://github.com/MerlKoryAmber/PostfixAdmin"
 TEMP_DIR="/tmp/postfix-admin-update"
+LIVE_SERVICE_FILE="/etc/systemd/system/postfix-admin.service"
+SERVICE_SAMPLE_FILE="$INSTALL_DIR/deploy/postfix-admin.service"
 
 echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}Postfix Admin Update Script${NC}"
@@ -187,13 +189,10 @@ if [ "$UPDATE_ALL" = true ] || [ "$UPDATE_DEPLOY" = true ]; then
         cp "$TEMP_DIR/deploy/update.sh" "$INSTALL_DIR/deploy/" 2>/dev/null || true
         cp "$TEMP_DIR/deploy/nginx-https.conf" "$INSTALL_DIR/deploy/" 2>/dev/null || true
         cp "$TEMP_DIR/deploy/postfix-admin.service" "$INSTALL_DIR/deploy/" 2>/dev/null || true
-        
-        # Обновление systemd unit если он изменился
         if [ -f "$TEMP_DIR/deploy/postfix-admin.service" ]; then
-            if ! cmp -s "$TEMP_DIR/deploy/postfix-admin.service" /etc/systemd/system/postfix-admin.service; then
-                cp "$TEMP_DIR/deploy/postfix-admin.service" /etc/systemd/system/postfix-admin.service
-                systemctl daemon-reload
-                echo -e "${GREEN}Systemd unit updated.${NC}"
+            echo -e "${YELLOW}Live systemd unit is left untouched to preserve the working SECRET_KEY and runtime settings.${NC}"
+            if [ -f "$LIVE_SERVICE_FILE" ] && ! cmp -s "$TEMP_DIR/deploy/postfix-admin.service" "$LIVE_SERVICE_FILE"; then
+                echo -e "${YELLOW}Review the sample unit at $SERVICE_SAMPLE_FILE before making manual service changes.${NC}"
             fi
         fi
         echo -e "${GREEN}Deploy scripts updated.${NC}"

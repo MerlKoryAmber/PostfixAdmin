@@ -9,14 +9,20 @@ import re
 import socket
 import subprocess
 import json
-import fcntl
 import shutil
 import ipaddress
 from datetime import datetime, timedelta
-from collections import defaultdict, Counter
+from collections import defaultdict, Counter, deque
 from functools import wraps
+import threading
+import time
 
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, send_from_directory
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
+from flask import Flask, render_template, render_template_string, request, redirect, url_for, flash, jsonify, abort, send_from_directory
 from flask_login import (
     LoginManager, UserMixin, login_user, login_required,
     logout_user, current_user
@@ -49,6 +55,55 @@ QUEUE_ID_PATTERN = re.compile(r'^[A-F0-9]{6,20}$', re.IGNORECASE)
 HOSTNAME_PATTERN = re.compile(
     r'^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$'
 )
+
+# --- UX helpers: JSON-aware responses, login rate limiting ---
+
+def wants_json():
+    """True if the request came from fetch()/AJAX and expects JSON."""
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return True
+    best = request.accept_mimetypes.best_match(['application/json', 'text/html'])
+    return best == 'application/json' and \
+        request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']
+
+def respond(message, category='info', redirect_endpoint='index', status=200, **extra):
+    """Return JSON for AJAX calls, otherwise classic flash + redirect."""
+    if wants_json():
+        payload = {'ok': category in ('success', 'info'), 'category': category, 'message': message}
+        payload.update(extra)
+        return jsonify(payload), status
+    flash(message, category)
+    return redirect(url_for(redirect_endpoint))
+
+# Простая защита от перебора пароля: 5 неудач -> блокировка IP на 5 минут
+_login_attempts = {}
+_login_lock = threading.Lock()
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCK_SECONDS = 300
+
+def _client_ip():
+    return request.headers.get('X-Real-IP') or request.remote_addr or 'unknown'
+
+def login_is_locked(ip):
+    with _login_lock:
+        fails, lock_until = _login_attempts.get(ip, (0, 0))
+        if lock_until and lock_until < time.time():
+            _login_attempts.pop(ip, None)
+            return False, 0
+        return bool(lock_until and lock_until > time.time()), max(0, int(lock_until - time.time()))
+
+def login_register_fail(ip):
+    with _login_lock:
+        fails, lock_until = _login_attempts.get(ip, (0, 0))
+        fails += 1
+        if fails >= LOGIN_MAX_ATTEMPTS:
+            lock_until = time.time() + LOGIN_LOCK_SECONDS
+            fails = 0
+        _login_attempts[ip] = (fails, lock_until)
+
+def login_register_success(ip):
+    with _login_lock:
+        _login_attempts.pop(ip, None)
 
 # --- Context processor for dynamic year ---
 @app.context_processor
@@ -172,7 +227,7 @@ def admin_required(f):
         if not current_user.is_authenticated:
             return redirect(url_for('login'))
         if current_user.role != 'admin':
-            flash('Administrator privileges required', 'danger')
+            flash('Требуются права администратора', 'danger')
             return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
@@ -261,7 +316,8 @@ def atomic_write_file(filepath, content):
     lock_file = filepath + '.lock'
     try:
         with open(lock_file, 'w') as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            if fcntl is not None:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
             if os.path.exists(filepath):
                 shutil.copy2(filepath, filepath + '.bak')
             with open(temp_file, 'w') as f:
@@ -276,20 +332,34 @@ def atomic_write_file(filepath, content):
                 try: os.unlink(f)
                 except: pass
 
+def _is_main_cf_continuation(line):
+    return bool(line) and line[0].isspace() and bool(line.strip()) and not line.strip().startswith('#')
+
 def parse_main_cf():
     params = {}
     if not os.path.exists(MAIN_CF_FILE):
         return params
     with open(MAIN_CF_FILE, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'): continue
-            if '=' in line:
-                key, value = line.split('=', 1)
-                key = key.strip()
-                value = value.strip().split('#')[0].strip()
-                if key in IMPORTANT_PARAMS:
-                    params[key] = value
+        lines = f.readlines()
+    i = 0
+    while i < len(lines):
+        raw = lines[i].rstrip('\n')
+        stripped = raw.strip()
+        if not stripped or stripped.startswith('#') or '=' not in raw or raw[0].isspace():
+            i += 1
+            continue
+        key, value = raw.split('=', 1)
+        key = key.strip()
+        if key in IMPORTANT_PARAMS:
+            parts = [value.split('#', 1)[0].strip()]
+            j = i + 1
+            while j < len(lines) and _is_main_cf_continuation(lines[j]):
+                parts.append(lines[j].strip().split('#', 1)[0].strip())
+                j += 1
+            params[key] = ' '.join(part for part in parts if part).strip()
+            i = j
+            continue
+        i += 1
     return params
 
 def get_sender_routing_mode():
@@ -607,6 +677,52 @@ def parse_log_line(line):
     if relay_match: result['relay'] = relay_match.group(1)
     return result
 
+QUEUE_LINE_RE = re.compile(
+    r'^(?P<qid>[A-F0-9]{6,20})(?P<flag>[*!])?\s+(?P<size>\d+)\s+'
+    r'(?P<when>\w{3}\s+\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2})\s+(?P<sender>\S*)\s*$'
+)
+
+def parse_postqueue(output):
+    """Robust `postqueue -p` parser.
+
+    Handles message flags (* active, ! hold), and recipient/reason lines
+    that Postfix prints indented on the following lines.
+    """
+    entries = []
+    current = None
+    for line in output.splitlines():
+        if not line.strip() or line.startswith('-Queue ID-') or line.startswith('-- '):
+            continue
+        m = QUEUE_LINE_RE.match(line)
+        if m:
+            qid = m.group('qid').upper()
+            flag = m.group('flag') or ''
+            status = 'deferred'
+            if flag == '*':
+                status = 'active'
+            elif flag == '!':
+                status = 'hold'
+            current = {
+                'queue_id': qid, 'size': m.group('size'),
+                'arrival_time': m.group('when'), 'sender': m.group('sender') or '',
+                'recipients': [], 'status': status, 'raw': line,
+            }
+            entries.append(current)
+        elif current is not None:
+            text = line.strip()
+            if not text:
+                continue
+            # причина задержки обычно в скобках, получатели — отдельными строками
+            if text.startswith('('):
+                current['status'] = current['status'] or 'deferred'
+                current['reason'] = text.strip('()')
+            else:
+                current['recipients'].append(text)
+    for e in entries:
+        e['recipient'] = e['recipients'][0] if e['recipients'] else ''
+        e['recipient_count'] = len(e['recipients'])
+    return entries
+
 def parse_queue_line(line):
     result = {
         'queue_id': '', 'size': '', 'arrival_time': '',
@@ -803,18 +919,15 @@ def index():
     try:
         result = subprocess.run(['/usr/sbin/postqueue', '-p'], capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
-            for line in result.stdout.splitlines():
-                entry = parse_queue_line(line)
-                if not entry.get('queue_id'):
-                    continue
+            for entry in parse_postqueue(result.stdout):
                 queue['total'] += 1
-                status = (entry.get('status') or '').lower()
-                if 'active' in status:
+                st = entry['status'].lower()
+                if 'active' in st:
                     queue['active'] += 1
-                elif 'deferred' in status:
-                    queue['deferred'] += 1
-                elif 'hold' in status:
+                elif 'hold' in st:
                     queue['hold'] += 1
+                else:
+                    queue['deferred'] += 1
     except Exception:
         pass
     postfix_running = False
@@ -843,25 +956,32 @@ def login():
     if current_user.is_authenticated:
         return redirect(url_for('index'))
     if request.method == 'POST':
+        ip = _client_ip()
+        locked, wait = login_is_locked(ip)
+        if locked:
+            flash(f'Слишком много попыток. Повторите через {wait // 60 + 1} мин.', 'danger')
+            return render_template('login.html'), 429
         username = sanitize_input(request.form.get('username',''))
         password = request.form.get('password','')
         if not username or not password:
-            flash('Please enter username and password', 'danger')
+            flash('Введите логин и пароль', 'danger')
             return render_template('login.html')
         users = load_users()
         if username in users and check_password_hash(users[username]['password'], password):
+            login_register_success(ip)
             user = User(username, users[username].get('role','user'))
             login_user(user)
-            flash('Login successful', 'success')
+            flash('Вход выполнен', 'success')
             return redirect(url_for('index'))
-        flash('Invalid username or password', 'danger')
+        login_register_fail(ip)
+        flash('Неверный логин или пароль', 'danger')
     return render_template('login.html')
 
-@app.route('/logout')
+@app.route('/logout', methods=['POST'])
 @login_required
 def logout():
     logout_user()
-    flash('You have been logged out', 'info')
+    flash('Вы вышли из системы', 'info')
     return redirect(url_for('login'))
 
 # --- User Management ---
@@ -879,18 +999,20 @@ def add_user():
     username = sanitize_input(request.form.get('username',''))
     password = request.form.get('password','')
     role = sanitize_input(request.form.get('role','user'))
+    if role not in ('admin', 'user'):
+        role = 'user'
     if not username or not password:
-        flash('Username and password are required', 'danger')
+        flash('Логин и пароль обязательны', 'danger')
         return redirect(url_for('list_users'))
     users = load_users()
     if username in users:
-        flash('User already exists', 'danger')
+        flash('Пользователь уже существует', 'danger')
         return redirect(url_for('list_users'))
     users[username] = {'password': generate_password_hash(password), 'role': role, 'created': datetime.now().isoformat()}
     if save_users(users):
-        flash(f'User {username} created', 'success')
+        flash(f'Пользователь {username} создан', 'success')
     else:
-        flash('Error saving user', 'danger')
+        flash('Ошибка сохранения пользователя', 'danger')
     return redirect(url_for('list_users'))
 
 @app.route('/users/delete/<username>', methods=['POST'])
@@ -898,17 +1020,17 @@ def add_user():
 @admin_required
 def delete_user(username):
     if username == current_user.id:
-        flash('Cannot delete yourself', 'danger')
+        flash('Нельзя удалить самого себя', 'danger')
         return redirect(url_for('list_users'))
     users = load_users()
     if username not in users:
-        flash('User not found', 'danger')
+        flash('Пользователь не найден', 'danger')
         return redirect(url_for('list_users'))
     del users[username]
     if save_users(users):
-        flash(f'User {username} deleted', 'success')
+        flash(f'Пользователь {username} удалён', 'success')
     else:
-        flash('Error deleting user', 'danger')
+        flash('Ошибка удаления пользователя', 'danger')
     return redirect(url_for('list_users'))
 
 @app.route('/users/reset-password/<username>', methods=['POST'])
@@ -917,17 +1039,17 @@ def delete_user(username):
 def admin_reset_password(username):
     new_password = request.form.get('new_password','')
     if not new_password:
-        flash('Password cannot be empty', 'danger')
+        flash('Пароль не может быть пустым', 'danger')
         return redirect(url_for('list_users'))
     users = load_users()
     if username not in users:
-        flash('User not found', 'danger')
+        flash('Пользователь не найден', 'danger')
         return redirect(url_for('list_users'))
     users[username]['password'] = generate_password_hash(new_password)
     if save_users(users):
-        flash(f'Password for {username} changed', 'success')
+        flash(f'Пароль для {username} изменён', 'success')
     else:
-        flash('Error changing password', 'danger')
+        flash('Ошибка смены пароля', 'danger')
     return redirect(url_for('list_users'))
 
 @app.route('/profile', methods=['GET','POST'])
@@ -937,17 +1059,17 @@ def profile():
         current_password = request.form.get('current_password','')
         new_password = request.form.get('new_password','')
         if not current_password or not new_password:
-            flash('All fields are required', 'danger')
+            flash('Заполните все поля', 'danger')
             return redirect(url_for('profile'))
         users = load_users()
         if not check_password_hash(users[current_user.id]['password'], current_password):
-            flash('Current password is incorrect', 'danger')
+            flash('Текущий пароль неверен', 'danger')
             return redirect(url_for('profile'))
         users[current_user.id]['password'] = generate_password_hash(new_password)
         if save_users(users):
-            flash('Password changed successfully', 'success')
+            flash('Пароль успешно изменён', 'success')
         else:
-            flash('Error changing password', 'danger')
+            flash('Ошибка смены пароля', 'danger')
         return redirect(url_for('profile'))
     return render_template('profile.html')
 
@@ -965,12 +1087,12 @@ def ip_whitelist():
 def add_ip():
     ip = sanitize_input(request.form.get('ip',''))
     if not ip:
-        flash('IP address is required', 'danger')
+        flash('Укажите IP-адрес', 'danger')
         return redirect(url_for('ip_whitelist'))
     try:
         ipaddress.ip_network(ip, strict=False)
     except ValueError:
-        flash('Invalid IP address or subnet', 'danger')
+        flash('Некорректный IP-адрес или подсеть', 'danger')
         return redirect(url_for('ip_whitelist'))
     ip_list = load_ip_whitelist()
     if ip not in ip_list:
@@ -978,11 +1100,11 @@ def add_ip():
         save_ip_whitelist(ip_list)
         ok, err = sync_nginx_ip_whitelist()
         if ok:
-            flash(f'IP {ip} added to whitelist', 'success')
+            flash(f'IP {ip} добавлен в белый список', 'success')
         else:
-            flash(f'IP {ip} saved, but nginx reload failed: {err}', 'warning')
+            flash(f'IP {ip} сохранён, но nginx не перезагрузился: {err}', 'warning')
     else:
-        flash('IP already in whitelist', 'warning')
+        flash('IP уже в белом списке', 'warning')
     return redirect(url_for('ip_whitelist'))
 
 @app.route('/ip-whitelist/delete', methods=['POST'])
@@ -996,11 +1118,11 @@ def delete_ip():
         save_ip_whitelist(ip_list)
         ok, err = sync_nginx_ip_whitelist()
         if ok:
-            flash(f'IP {ip} removed from whitelist', 'success')
+            flash(f'IP {ip} удалён из белого списка', 'success')
         else:
-            flash(f'IP {ip} removed, but nginx reload failed: {err}', 'warning')
+            flash(f'IP {ip} удалён, но nginx не перезагрузился: {err}', 'warning')
     else:
-        flash('IP not found', 'danger')
+        flash('IP не найден', 'danger')
     return redirect(url_for('ip_whitelist'))
 
 # --- Configuration ---
@@ -1026,29 +1148,35 @@ def save_config():
         value = sanitize_input(request.form.get(key, ''))
         new_params[key] = value
     if not os.path.exists(MAIN_CF_FILE):
-        flash('main.cf file not found', 'danger')
+        flash('Файл main.cf не найден', 'danger')
         return redirect(url_for('main_config'))
     with open(MAIN_CF_FILE, 'r') as f:
         lines = f.readlines()
     updated_lines = []
     updated_params = set()
-    for line in lines:
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         stripped = line.strip()
-        if stripped and not stripped.startswith('#') and '=' in stripped:
-            key = stripped.split('=')[0].strip()
+        if stripped and not stripped.startswith('#') and '=' in line and not line[0].isspace():
+            key = line.split('=', 1)[0].strip()
             if key in new_params:
                 updated_lines.append(f"{key} = {new_params[key]}\n")
                 updated_params.add(key)
+                i += 1
+                while i < len(lines) and _is_main_cf_continuation(lines[i]):
+                    i += 1
                 continue
         updated_lines.append(line)
+        i += 1
     for key, value in new_params.items():
         if key not in updated_params and value:
             updated_lines.append(f"\n{key} = {value}\n")
     success, error = atomic_write_file(MAIN_CF_FILE, ''.join(updated_lines))
     if success:
-        flash('Configuration updated successfully', 'success')
+        flash('Конфигурация обновлена', 'success')
     else:
-        flash(f'Error saving configuration: {error}', 'danger')
+        flash(f'Ошибка сохранения конфигурации: {error}', 'danger')
     return redirect(url_for('main_config'))
 
 @app.route('/config/reload', methods=['POST'])
@@ -1058,11 +1186,11 @@ def reload_postfix():
     try:
         subprocess.run(['/usr/sbin/postfix', 'check'], check=True, capture_output=True, timeout=10)
         subprocess.run(['/usr/sbin/postfix', 'reload'], check=True, capture_output=True, timeout=30)
-        flash('Postfix reloaded successfully', 'success')
+        flash('Postfix успешно перезагружен', 'success')
     except subprocess.CalledProcessError as e:
-        flash(f'Error: {e.stderr.decode().strip()}', 'danger')
+        flash(f'Ошибка: {e.stderr.decode().strip()}', 'danger')
     except Exception as e:
-        flash(f'Error: {str(e)}', 'danger')
+        flash(f'Ошибка: {str(e)}', 'danger')
     return redirect(url_for('main_config'))
 
 @app.route('/config/check')
@@ -1072,11 +1200,11 @@ def check_config():
     try:
         result = subprocess.run(['/usr/sbin/postfix', 'check'], capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
-            flash('✅ Postfix configuration is valid', 'success')
+            flash('✅ Конфигурация Postfix корректна', 'success')
         else:
-            flash(f'❌ Configuration errors:\n{result.stderr}', 'danger')
+            flash(f'❌ Ошибки конфигурации:\n{result.stderr}', 'danger')
     except Exception as e:
-        flash(f'Error: {str(e)}', 'danger')
+        flash(f'Ошибка: {str(e)}', 'danger')
     return redirect(url_for('main_config'))
 
 # --- Transport ---
@@ -1097,11 +1225,11 @@ def add_transport():
     domain = sanitize_input(request.form.get('domain',''))
     destination = sanitize_input(request.form.get('destination',''))
     if not domain or not destination:
-        flash('Domain and destination are required', 'danger')
+        flash('Домен и назначение обязательны', 'danger')
         return redirect(url_for('transport'))
     entries = parse_transport()
     if any(e['domain'] == domain for e in entries):
-        flash(f'Domain {domain} already exists', 'warning')
+        flash(f'Домен {domain} уже существует', 'warning')
         return redirect(url_for('transport'))
     entries.append({'domain': domain, 'destination': destination})
     content = "# Postfix transport map\n# Managed via web interface\n\n"
@@ -1109,10 +1237,16 @@ def add_transport():
         content += f"{entry['domain']}\t{entry['destination']}\n"
     success, error = atomic_write_file(TRANSPORT_FILE, content)
     if success:
-        subprocess.run(['/usr/sbin/postmap', TRANSPORT_FILE], check=True, capture_output=True)
-        flash(f'Transport added: {domain} → {destination}', 'success')
+        try:
+            subprocess.run(['/usr/sbin/postmap', TRANSPORT_FILE], check=True, capture_output=True, timeout=10)
+            flash(f'Транспорт добавлен: {domain} → {destination}', 'success')
+        except subprocess.CalledProcessError as e:
+            message = (e.stderr or e.stdout or b'postmap failed').decode(errors='replace').strip()
+            flash(f'Запись сохранена, но postmap завершился с ошибкой: {message}', 'warning')
+        except Exception as e:
+            flash(f'Запись сохранена, но postmap не выполнен: {e}', 'warning')
     else:
-        flash(f'Error saving: {error}', 'danger')
+        flash(f'Ошибка сохранения: {error}', 'danger')
     return redirect(url_for('transport'))
 
 @app.route('/transport/delete', methods=['POST'])
@@ -1121,7 +1255,7 @@ def add_transport():
 def delete_transport():
     domain = sanitize_input(request.form.get('domain', ''))
     if not domain:
-        flash('Domain is required', 'danger')
+        flash('Укажите домен', 'danger')
         return redirect(url_for('transport'))
     entries = parse_transport()
     entries = [e for e in entries if e['domain'] != domain]
@@ -1130,10 +1264,16 @@ def delete_transport():
         content += f"{entry['domain']}\t{entry['destination']}\n"
     success, error = atomic_write_file(TRANSPORT_FILE, content)
     if success:
-        subprocess.run(['/usr/sbin/postmap', TRANSPORT_FILE], check=True, capture_output=True)
-        flash(f'Transport deleted for {domain}', 'success')
+        try:
+            subprocess.run(['/usr/sbin/postmap', TRANSPORT_FILE], check=True, capture_output=True, timeout=10)
+            flash(f'Транспорт для {domain} удалён', 'success')
+        except subprocess.CalledProcessError as e:
+            message = (e.stderr or e.stdout or b'postmap failed').decode(errors='replace').strip()
+            flash(f'Удаление сохранено, но postmap завершился с ошибкой: {message}', 'warning')
+        except Exception as e:
+            flash(f'Удаление сохранено, но postmap не выполнен: {e}', 'warning')
     else:
-        flash(f'Error: {error}', 'danger')
+        flash(f'Ошибка: {error}', 'danger')
     return redirect(url_for('transport'))
 
 # --- Sender Routing ---
@@ -1160,14 +1300,14 @@ def add_sender_routing():
         return redirect(url_for('sender_routing'))
     entries = parse_sender_transport()
     if any(e['sender'] == entry['sender'] for e in entries):
-        flash(f'Sender {entry["sender"]} already exists. Edit the existing rule instead.', 'warning')
+        flash(f'Отправитель {entry["sender"]} уже существует. Отредактируйте существующее правило.', 'warning')
         return redirect(url_for('sender_routing'))
     entries.append(entry)
     success, error = save_sender_routing(entries)
     if success:
-        flash(f'Routing rule added: {entry["sender"]} → {entry["transport"]}', 'success')
+        flash(f'Правило добавлено: {entry["sender"]} → {entry["transport"]}', 'success')
     else:
-        flash(f'Error: {error}', 'danger')
+        flash(f'Ошибка: {error}', 'danger')
     return redirect(url_for('sender_routing'))
 
 @app.route('/sender-routing/edit', methods=['POST'])
@@ -1176,7 +1316,7 @@ def add_sender_routing():
 def edit_sender_routing():
     original_sender = sanitize_input(request.form.get('original_sender', ''))
     if not original_sender:
-        flash('Original sender is required', 'danger')
+        flash('Не указан исходный отправитель', 'danger')
         return redirect(url_for('sender_routing'))
     try:
         entry = entry_from_form(
@@ -1194,18 +1334,18 @@ def edit_sender_routing():
             found = True
             break
     if not found:
-        flash('Rule not found', 'danger')
+        flash('Правило не найдено', 'danger')
         return redirect(url_for('sender_routing'))
     if entry['sender'] != original_sender:
         duplicates = [e for e in entries if e['sender'] == entry['sender']]
         if len(duplicates) > 1:
-            flash(f'Sender {entry["sender"]} already exists', 'warning')
+            flash(f'Отправитель {entry["sender"]} уже существует', 'warning')
             return redirect(url_for('sender_routing'))
     success, error = save_sender_routing(entries)
     if success:
-        flash(f'Routing rule updated: {entry["sender"]} → {entry["transport"]}', 'success')
+        flash(f'Правило обновлено: {entry["sender"]} → {entry["transport"]}', 'success')
     else:
-        flash(f'Error: {error}', 'danger')
+        flash(f'Ошибка: {error}', 'danger')
     return redirect(url_for('sender_routing'))
 
 @app.route('/sender-routing/delete', methods=['POST'])
@@ -1216,13 +1356,13 @@ def delete_sender_routing():
     all_entries = parse_sender_transport()
     entries = [e for e in all_entries if e['sender'] != sender]
     if len(entries) == len(all_entries):
-        flash('Rule not found', 'warning')
+        flash('Правило не найдено', 'warning')
         return redirect(url_for('sender_routing'))
     success, error = save_sender_routing(entries)
     if success:
-        flash(f'Routing rule deleted for {sender}', 'success')
+        flash(f'Правило для {sender} удалено', 'success')
     else:
-        flash(f'Error: {error}', 'danger')
+        flash(f'Ошибка: {error}', 'danger')
     return redirect(url_for('sender_routing'))
 
 @app.route('/sender-routing/test', methods=['POST'])
@@ -1230,14 +1370,11 @@ def delete_sender_routing():
 def test_sender_routing():
     sender = sanitize_input(request.form.get('sender', ''))
     if not sender:
-        flash('Sender address is required', 'danger')
-        return redirect(url_for('sender_routing'))
+        return respond('Укажите адрес отправителя', 'danger', 'sender_routing', 400)
     ok, result = test_sender_route(sender)
     if ok:
-        flash(f'Route for {sender}: {result}', 'success')
-    else:
-        flash(f'No route for {sender}: {result}', 'warning')
-    return redirect(url_for('sender_routing'))
+        return respond(f'Маршрут для {sender}: {result}', 'success', 'sender_routing', result=result)
+    return respond(f'Маршрут для {sender} не найден: {result}', 'warning', 'sender_routing')
 
 # --- Relay Hosts Management ---
 @app.route('/relay-hosts')
@@ -1256,16 +1393,13 @@ def relay_hosts():
 def check_host():
     transport = sanitize_input(request.form.get('transport', ''))
     if not transport:
-        flash('Transport is required', 'danger')
-        return redirect(url_for('relay_hosts'))
+        return respond('Укажите хост', 'danger', 'relay_hosts', 400)
     status, msg = check_relay_host(transport)
     host, port = extract_host_port(transport)
     label = f'{host}:{port}'
     if status:
-        flash(f'Host {label} is reachable: {msg}', 'success')
-    else:
-        flash(f'Host {label} is unreachable: {msg}', 'danger')
-    return redirect(url_for('relay_hosts'))
+        return respond(f'{label} доступен: {msg}', 'success', 'relay_hosts')
+    return respond(f'{label} недоступен: {msg}', 'danger', 'relay_hosts')
 
 @app.route('/relay-hosts/replace', methods=['POST'])
 @login_required
@@ -1274,18 +1408,18 @@ def replace_relay_host():
     old_key = sanitize_input(request.form.get('old_host', ''))
     new_transport = sanitize_input(request.form.get('new_host', ''))
     if not old_key or not new_transport:
-        flash('Both old and new host are required', 'danger')
+        flash('Укажите старый и новый хост', 'danger')
         return redirect(url_for('relay_hosts'))
     try:
         old_host, old_port = old_key.rsplit(':', 1)
         old_port = int(old_port)
     except ValueError:
-        flash('Invalid old host selection', 'danger')
+        flash('Некорректный выбор старого хоста', 'danger')
         return redirect(url_for('relay_hosts'))
     try:
         new_host, new_port = extract_host_port(new_transport)
     except Exception:
-        flash('Invalid new host format', 'danger')
+        flash('Некорректный формат нового хоста', 'danger')
         return redirect(url_for('relay_hosts'))
     mode, _ = get_sender_routing_mode()
     entries = parse_sender_transport()
@@ -1297,13 +1431,13 @@ def replace_relay_host():
             entry['transport'] = format_postfix_value(new_host, new_port, mode)
             changed += 1
     if changed == 0:
-        flash(f'No rules found for {old_key}', 'warning')
+        flash(f'Правил для {old_key} не найдено', 'warning')
         return redirect(url_for('relay_hosts'))
     success, error = save_sender_routing(entries)
     if success:
-        flash(f'Replaced {old_key} in {changed} rules', 'success')
+        flash(f'Хост {old_key} заменён в {changed} правилах', 'success')
     else:
-        flash(f'Error: {error}', 'danger')
+        flash(f'Ошибка: {error}', 'danger')
     return redirect(url_for('relay_hosts'))
 
 # --- Mail Queue ---
@@ -1315,30 +1449,41 @@ def view_queue():
     try:
         result = subprocess.run(['/usr/sbin/postqueue', '-p'], capture_output=True, text=True, timeout=15)
         if result.returncode == 0:
-            lines = result.stdout.strip().split('\n')
-            in_queue = False
-            for line in lines:
-                if line.startswith('-Queue ID-'):
-                    in_queue = True
-                    continue
-                if line.startswith('-- '):
-                    in_queue = False
-                    continue
-                if in_queue and line.strip():
-                    entry = parse_queue_line(line)
-                    if entry['queue_id']:
-                        entries.append(entry)
+            entries = parse_postqueue(result.stdout)
     except Exception as e:
-        flash(f'Error reading queue: {str(e)}', 'danger')
+        flash(f'Не удалось прочитать очередь: {e}', 'danger')
+
+    # поиск по ID / отправителю / получателю / статусу
+    q = sanitize_input(request.args.get('q', ''))
+    if q:
+        ql = q.lower()
+        entries = [e for e in entries if
+                   ql in e['queue_id'].lower()
+                   or ql in (e.get('sender') or '').lower()
+                   or ql in (e.get('recipient') or '').lower()
+                   or ql in (e.get('status') or '').lower()]
+
     stats = {'total': len(entries), 'active': 0, 'deferred': 0, 'hold': 0}
     for entry in entries:
-        if 'active' in entry['status'].lower():
+        st = entry['status'].lower()
+        if 'active' in st:
             stats['active'] += 1
-        elif 'deferred' in entry['status'].lower():
-            stats['deferred'] += 1
-        elif 'hold' in entry['status'].lower():
+        elif 'hold' in st:
             stats['hold'] += 1
-    return render_template('queue.html', entries=entries, stats=stats)
+        else:
+            stats['deferred'] += 1
+
+    # пагинация
+    per_page = request.args.get('per_page', 50, type=int)
+    if per_page not in (25, 50, 100, 200):
+        per_page = 50
+    total = len(entries)
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = min(max(1, request.args.get('page', 1, type=int)), pages)
+    entries_page = entries[(page - 1) * per_page: page * per_page]
+
+    return render_template('queue.html', entries=entries_page, stats=stats,
+                           q=q, page=page, pages=pages, per_page=per_page, total=total)
 
 @app.route('/queue/message/<queue_id>')
 @login_required
@@ -1346,12 +1491,12 @@ def view_queue():
 def view_message_detail(queue_id):
     qid = normalize_queue_id(queue_id)
     if not qid:
-        flash('Invalid queue ID', 'danger')
+        flash('Некорректный ID письма', 'danger')
         return redirect(url_for('view_queue'))
     try:
         result = subprocess.run(['/usr/sbin/postcat', '-q', qid], capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
-            flash(f'Message {qid} not found', 'danger')
+            flash(f'Письмо {qid} не найдено', 'danger')
             return redirect(url_for('view_queue'))
         headers = {}
         body = ''
@@ -1366,7 +1511,7 @@ def view_message_detail(queue_id):
                 headers[key.strip()] = value.strip()
         return render_template('message_detail.html', queue_id=qid, headers=headers, body=body)
     except Exception as e:
-        flash(f'Error: {str(e)}', 'danger')
+        flash(f'Ошибка: {str(e)}', 'danger')
         return redirect(url_for('view_queue'))
 
 @app.route('/queue/flush', methods=['POST'])
@@ -1375,10 +1520,9 @@ def view_message_detail(queue_id):
 def flush_queue():
     try:
         subprocess.run(['/usr/sbin/postqueue', '-f'], check=True, capture_output=True, timeout=30)
-        flash('Queue flush initiated', 'success')
+        return respond('Отправка очереди запущена', 'success', 'view_queue')
     except subprocess.CalledProcessError as e:
-        flash(f'Error: {e.stderr.decode().strip()}', 'danger')
-    return redirect(url_for('view_queue'))
+        return respond(f'Ошибка: {e.stderr.decode().strip()}', 'danger', 'view_queue', 500)
 
 @app.route('/queue/delete/<queue_id>', methods=['POST'])
 @login_required
@@ -1386,14 +1530,12 @@ def flush_queue():
 def delete_queue_message(queue_id):
     qid = normalize_queue_id(queue_id)
     if not qid:
-        flash('Invalid queue ID', 'danger')
-        return redirect(url_for('view_queue'))
+        return respond('Некорректный ID письма', 'danger', 'view_queue', 400)
     try:
         subprocess.run(['/usr/sbin/postsuper', '-d', qid], check=True, capture_output=True, timeout=10)
-        flash(f'Message {qid} deleted', 'success')
+        return respond(f'Письмо {qid} удалено', 'success', 'view_queue', queue_id=qid)
     except subprocess.CalledProcessError as e:
-        flash(f'Error: {e.stderr.decode().strip()}', 'danger')
-    return redirect(url_for('view_queue'))
+        return respond(f'Ошибка: {e.stderr.decode().strip()}', 'danger', 'view_queue', 500)
 
 @app.route('/queue/hold/<queue_id>', methods=['POST'])
 @login_required
@@ -1401,14 +1543,12 @@ def delete_queue_message(queue_id):
 def hold_message(queue_id):
     qid = normalize_queue_id(queue_id)
     if not qid:
-        flash('Invalid queue ID', 'danger')
-        return redirect(url_for('view_queue'))
+        return respond('Некорректный ID письма', 'danger', 'view_queue', 400)
     try:
         subprocess.run(['/usr/sbin/postsuper', '-h', qid], check=True, capture_output=True, timeout=10)
-        flash(f'Message {qid} placed on hold', 'success')
+        return respond(f'Письмо {qid} поставлено на hold', 'success', 'view_queue', queue_id=qid)
     except subprocess.CalledProcessError as e:
-        flash(f'Error: {e.stderr.decode().strip()}', 'danger')
-    return redirect(url_for('view_queue'))
+        return respond(f'Ошибка: {e.stderr.decode().strip()}', 'danger', 'view_queue', 500)
 
 @app.route('/queue/release/<queue_id>', methods=['POST'])
 @login_required
@@ -1416,14 +1556,12 @@ def hold_message(queue_id):
 def release_message(queue_id):
     qid = normalize_queue_id(queue_id)
     if not qid:
-        flash('Invalid queue ID', 'danger')
-        return redirect(url_for('view_queue'))
+        return respond('Некорректный ID письма', 'danger', 'view_queue', 400)
     try:
         subprocess.run(['/usr/sbin/postsuper', '-H', qid], check=True, capture_output=True, timeout=10)
-        flash(f'Message {qid} released from hold', 'success')
+        return respond(f'Письмо {qid} снято с hold', 'success', 'view_queue', queue_id=qid)
     except subprocess.CalledProcessError as e:
-        flash(f'Error: {e.stderr.decode().strip()}', 'danger')
-    return redirect(url_for('view_queue'))
+        return respond(f'Ошибка: {e.stderr.decode().strip()}', 'danger', 'view_queue', 500)
 
 @app.route('/queue/requeue/<queue_id>', methods=['POST'])
 @login_required
@@ -1431,14 +1569,12 @@ def release_message(queue_id):
 def requeue_message(queue_id):
     qid = normalize_queue_id(queue_id)
     if not qid:
-        flash('Invalid queue ID', 'danger')
-        return redirect(url_for('view_queue'))
+        return respond('Некорректный ID письма', 'danger', 'view_queue', 400)
     try:
         subprocess.run(['/usr/sbin/postsuper', '-r', qid], check=True, capture_output=True, timeout=10)
-        flash(f'Message {qid} requeued', 'success')
+        return respond(f'Письмо {qid} возвращено в очередь', 'success', 'view_queue', queue_id=qid)
     except subprocess.CalledProcessError as e:
-        flash(f'Error: {e.stderr.decode().strip()}', 'danger')
-    return redirect(url_for('view_queue'))
+        return respond(f'Ошибка: {e.stderr.decode().strip()}', 'danger', 'view_queue', 500)
 
 @app.route('/queue/delete-all', methods=['POST'])
 @login_required
@@ -1446,10 +1582,9 @@ def requeue_message(queue_id):
 def delete_all_queue():
     try:
         subprocess.run(['/usr/sbin/postsuper', '-d', 'ALL'], check=True, capture_output=True, timeout=30)
-        flash('All messages deleted', 'success')
+        return respond('Все письма удалены из очереди', 'success', 'view_queue')
     except subprocess.CalledProcessError as e:
-        flash(f'Error: {e.stderr.decode().strip()}', 'danger')
-    return redirect(url_for('view_queue'))
+        return respond(f'Ошибка: {e.stderr.decode().strip()}', 'danger', 'view_queue', 500)
 
 @app.route('/queue/delete-deferred', methods=['POST'])
 @login_required
@@ -1457,66 +1592,54 @@ def delete_all_queue():
 def delete_deferred():
     try:
         subprocess.run(['/usr/sbin/postsuper', '-d', 'ALL', 'deferred'], check=True, capture_output=True, timeout=30)
-        flash('All deferred messages deleted', 'success')
+        return respond('Все отложенные (deferred) письма удалены', 'success', 'view_queue')
     except subprocess.CalledProcessError as e:
-        flash(f'Error: {e.stderr.decode().strip()}', 'danger')
-    return redirect(url_for('view_queue'))
+        return respond(f'Ошибка: {e.stderr.decode().strip()}', 'danger', 'view_queue', 500)
 
 @app.route('/queue/delete-by-sender', methods=['POST'])
 @login_required
 @admin_required
 def delete_by_sender():
-    sender = sanitize_input(request.form.get('sender',''))
+    sender = sanitize_input(request.form.get('sender','')).lower()
     if not sender:
-        flash('Sender is required', 'danger')
-        return redirect(url_for('view_queue'))
+        return respond('Укажите отправителя', 'danger', 'view_queue', 400)
     try:
         result = subprocess.run(['/usr/sbin/postqueue', '-p'], capture_output=True, text=True, timeout=10)
         deleted = 0
-        for line in result.stdout.split('\n'):
-            if sender in line:
-                parts = line.split()
-                if parts:
-                    qid = normalize_queue_id(parts[0])
-                    if not qid:
-                        continue
-                    try:
-                        subprocess.run(['/usr/sbin/postsuper', '-d', qid], check=True, capture_output=True, timeout=5)
-                        deleted += 1
-                    except subprocess.CalledProcessError:
-                        pass
-        flash(f'Deleted {deleted} messages from sender {sender}', 'success')
+        for entry in parse_postqueue(result.stdout):
+            if (entry.get('sender') or '').lower() == sender:
+                try:
+                    subprocess.run(['/usr/sbin/postsuper', '-d', entry['queue_id']],
+                                   check=True, capture_output=True, timeout=5)
+                    deleted += 1
+                except subprocess.CalledProcessError:
+                    pass
+        return respond(f'Удалено писем от {sender}: {deleted}', 'success', 'view_queue', deleted=deleted)
     except Exception as e:
-        flash(f'Error: {str(e)}', 'danger')
-    return redirect(url_for('view_queue'))
+        return respond(f'Ошибка: {e}', 'danger', 'view_queue', 500)
 
 @app.route('/queue/delete-by-domain', methods=['POST'])
 @login_required
 @admin_required
 def delete_by_domain():
-    domain = sanitize_input(request.form.get('domain',''))
+    domain = sanitize_input(request.form.get('domain','')).lower().lstrip('@')
     if not domain:
-        flash('Domain is required', 'danger')
-        return redirect(url_for('view_queue'))
+        return respond('Укажите домен', 'danger', 'view_queue', 400)
     try:
         result = subprocess.run(['/usr/sbin/postqueue', '-p'], capture_output=True, text=True, timeout=10)
         deleted = 0
-        for line in result.stdout.split('\n'):
-            if domain in line:
-                parts = line.split()
-                if parts:
-                    qid = normalize_queue_id(parts[0])
-                    if not qid:
-                        continue
-                    try:
-                        subprocess.run(['/usr/sbin/postsuper', '-d', qid], check=True, capture_output=True, timeout=5)
-                        deleted += 1
-                    except subprocess.CalledProcessError:
-                        pass
-        flash(f'Deleted {deleted} messages for domain {domain}', 'success')
+        for entry in parse_postqueue(result.stdout):
+            sender_domain = (entry.get('sender') or '').lower().rsplit('@', 1)[-1]
+            if entry.get('sender') and sender_domain == domain:
+                try:
+                    subprocess.run(['/usr/sbin/postsuper', '-d', entry['queue_id']],
+                                   check=True, capture_output=True, timeout=5)
+                    deleted += 1
+                except subprocess.CalledProcessError:
+                    pass
+        return respond(f'Удалено писем для домена {domain}: {deleted}', 'success', 'view_queue', deleted=deleted)
     except Exception as e:
-        flash(f'Error: {str(e)}', 'danger')
-    return redirect(url_for('view_queue'))
+        return respond(f'Ошибка: {e}', 'danger', 'view_queue', 500)
 
 # --- Statistics ---
 @app.route('/stats')
@@ -1544,8 +1667,7 @@ def view_logs():
     lines = []
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, 'r') as f:
-            all_lines = f.readlines()
-            lines = all_lines[-MAX_LOG_LINES:]
+            lines = list(deque(f, maxlen=MAX_LOG_LINES))
     parsed = [parse_log_line(line.strip()) for line in lines]
     from_filter = sanitize_input(request.args.get('from',''))
     to_filter = sanitize_input(request.args.get('to',''))
@@ -1580,8 +1702,7 @@ def api_logs():
     lines = []
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, 'r') as f:
-            all_lines = f.readlines()
-            lines = all_lines[-100:]
+            lines = list(deque(f, maxlen=100))
     return jsonify({'lines': [l.strip() for l in lines]})
 
 @app.route('/api/status')
@@ -1617,17 +1738,48 @@ def list_users_cli():
     for username, data in users.items():
         print(f"{username} - {data.get('role','user')}")
 
+def render_error_page(message, status_code):
+    return render_template_string(
+        """<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ status_code }} - {{ message }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; }
+        main { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+        section { max-width: 640px; background: #111827; border: 1px solid #334155; border-radius: 12px; padding: 32px; }
+        h1 { margin-top: 0; }
+        p { color: #cbd5e1; line-height: 1.5; }
+        a { color: #93c5fd; }
+    </style>
+</head>
+<body>
+    <main>
+        <section>
+            <h1>{{ status_code }}</h1>
+            <p>{{ message }}</p>
+            <p><a href="{{ url_for('index') }}">Вернуться на дашборд</a></p>
+        </section>
+    </main>
+</body>
+</html>""",
+        message=message,
+        status_code=status_code,
+    ), status_code
+
 @app.errorhandler(404)
 def not_found(e):
-    return render_template('base.html', error='Page not found'), 404
+    return render_error_page('Страница не найдена', 404)
 
 @app.errorhandler(500)
 def server_error(e):
-    return render_template('base.html', error='Internal server error'), 500
+    return render_error_page('Внутренняя ошибка сервера', 500)
 
 @app.errorhandler(403)
 def forbidden(e):
-    return render_template('base.html', error='Access denied'), 403
+    return render_error_page('Доступ запрещён', 403)
 
 if __name__ == '__main__':
     if not os.path.exists(USERS_FILE):

@@ -1,14 +1,13 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() if current_user.is_authenticated else '' }}">
     <title>{% block title %}Postfix Admin{% endblock %} — InterROS</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}?v=2">
-    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}?v=2">
-    <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon-32.png') }}?v=2">
     <link rel="stylesheet" href="{{ url_for('static', filename='bootstrap.min.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=ui4">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=ui5">
 </head>
 <body class="{% if current_user.is_authenticated %}has-sidebar{% else %}login-body{% endif %}">
     {% if current_user.is_authenticated %}
@@ -22,25 +21,25 @@
         </a>
 
         <nav class="sidebar-nav">
-            <p class="nav-section">Overview</p>
-            <a class="side-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}">Dashboard</a>
+            <p class="nav-section">Обзор</p>
+            <a class="side-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}">Дашборд</a>
 
-            <p class="nav-section">Mail</p>
-            <a class="side-link {% if request.endpoint == 'main_config' %}active{% endif %}" href="{{ url_for('main_config') }}">Configuration</a>
-            <a class="side-link {% if request.endpoint == 'transport' %}active{% endif %}" href="{{ url_for('transport') }}">Transport</a>
-            <a class="side-link {% if request.endpoint == 'sender_routing' %}active{% endif %}" href="{{ url_for('sender_routing') }}">Routing</a>
+            <p class="nav-section">Почта</p>
+            <a class="side-link {% if request.endpoint == 'main_config' %}active{% endif %}" href="{{ url_for('main_config') }}">Конфигурация</a>
+            <a class="side-link {% if request.endpoint == 'transport' %}active{% endif %}" href="{{ url_for('transport') }}">Транспорт</a>
+            <a class="side-link {% if request.endpoint == 'sender_routing' %}active{% endif %}" href="{{ url_for('sender_routing') }}">Маршрутизация</a>
             {% if current_user.role == 'admin' %}
-            <a class="side-link {% if request.endpoint == 'relay_hosts' %}active{% endif %}" href="{{ url_for('relay_hosts') }}">Relay Hosts</a>
-            <a class="side-link {% if request.endpoint in ['view_queue', 'view_message_detail'] %}active{% endif %}" href="{{ url_for('view_queue') }}">Queue</a>
+            <a class="side-link {% if request.endpoint == 'relay_hosts' %}active{% endif %}" href="{{ url_for('relay_hosts') }}">Релей-хосты</a>
+            <a class="side-link {% if request.endpoint in ['view_queue', 'view_message_detail'] %}active{% endif %}" href="{{ url_for('view_queue') }}">Очередь</a>
             {% endif %}
 
-            <p class="nav-section">Observe</p>
-            <a class="side-link {% if request.endpoint == 'view_stats' %}active{% endif %}" href="{{ url_for('view_stats') }}">Statistics</a>
-            <a class="side-link {% if request.endpoint == 'view_logs' %}active{% endif %}" href="{{ url_for('view_logs') }}">Logs</a>
+            <p class="nav-section">Наблюдение</p>
+            <a class="side-link {% if request.endpoint == 'view_stats' %}active{% endif %}" href="{{ url_for('view_stats') }}">Статистика</a>
+            <a class="side-link {% if request.endpoint == 'view_logs' %}active{% endif %}" href="{{ url_for('view_logs') }}">Логи</a>
 
             {% if current_user.role == 'admin' %}
-            <p class="nav-section">Administration</p>
-            <a class="side-link {% if request.endpoint == 'list_users' %}active{% endif %}" href="{{ url_for('list_users') }}">Users</a>
+            <p class="nav-section">Администрирование</p>
+            <a class="side-link {% if request.endpoint == 'list_users' %}active{% endif %}" href="{{ url_for('list_users') }}">Пользователи</a>
             <a class="side-link {% if request.endpoint == 'ip_whitelist' %}active{% endif %}" href="{{ url_for('ip_whitelist') }}">IP Whitelist</a>
             {% endif %}
         </nav>
@@ -50,8 +49,11 @@
                 <strong>{{ current_user.id }}</strong>
                 <span>{{ current_user.role }}</span>
             </div>
-            <a class="side-link side-link-quiet" href="{{ url_for('profile') }}">Password</a>
-            <a class="side-link side-link-quiet" href="{{ url_for('logout') }}">Sign out</a>
+            <a class="side-link side-link-quiet" href="{{ url_for('profile') }}">Смена пароля</a>
+            <form method="POST" action="{{ url_for('logout') }}">
+                {% include '_csrf.html' %}
+                <button type="submit" class="side-link side-link-quiet side-link-button">Выйти</button>
+            </form>
         </div>
     </aside>
     {% endif %}
@@ -59,8 +61,10 @@
     <div class="app-shell">
         {% if current_user.is_authenticated %}
         <header class="topbar">
-            <button class="sidebar-toggle" type="button" aria-label="Menu" onclick="document.body.classList.toggle('sidebar-open')">☰</button>
+            <button class="sidebar-toggle" type="button" aria-label="Меню" onclick="document.body.classList.toggle('sidebar-open')">☰</button>
             <span class="topbar-title">{{ self.title() }}</span>
+            <span class="topbar-spacer"></span>
+            <button class="theme-toggle" type="button" id="themeToggle" aria-label="Переключить тему" title="Светлая / тёмная тема">◐</button>
         </header>
         {% endif %}
 
@@ -68,9 +72,9 @@
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     {% for category, message in messages %}
-                    <div class="alert alert-{{ category }} alert-dismissible fade show mb-4" role="alert">
+                    <div class="alert alert-{{ category }} alert-dismissible fade show mb-4 js-flash" role="alert">
                         {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Закрыть"></button>
                     </div>
                     {% endfor %}
                 {% endif %}
@@ -81,11 +85,32 @@
         <footer class="site-footer">
             <span class="footer-brand">InterROS</span>
             <span class="mx-2">·</span>
-            <small>Postfix Administration Panel · &copy; {{ current_year }}</small>
+            <small>Панель администрирования Postfix · &copy; {{ current_year }}</small>
         </footer>
     </div>
 
+    <!-- Toast-уведомления -->
+    <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+    <!-- Модальное подтверждение деструктивных действий -->
+    <div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content confirm-modal">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirmTitle">Подтверждение</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
+                <div class="modal-body" id="confirmBody">Вы уверены?</div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-danger btn-sm" id="confirmOk">Подтвердить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='bootstrap.bundle.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=ui5"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
