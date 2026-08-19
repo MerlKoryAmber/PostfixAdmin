@@ -18,12 +18,17 @@ APP_GROUP="postfixadmin"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WHEEL_FILE="$SCRIPT_DIR/Flask_Login-0.6.3-py3-none-any.whl"
+REQUIREMENTS_FILE="$REPO_ROOT/requirements.txt"
 SENDER_MAP="/etc/postfix/sender_transport"
 SASL_PASSWD="/etc/postfix/sender_sasl_passwd"
 MAIN_CF="/etc/postfix/main.cf"
 TLS_CERT="/etc/nginx/ssl/postfix-admin.crt"
 TLS_KEY="/etc/nginx/ssl/postfix-admin.key"
 SERVICE_FILE="/etc/systemd/system/postfix-admin.service"
+VENV_DIR="$INSTALL_DIR/venv"
+VENV_PIP="$VENV_DIR/bin/pip"
+VENV_GUNICORN="$VENV_DIR/bin/gunicorn"
+VENV_FLASK="$VENV_DIR/bin/flask"
 
 detect_postfix_routing() {
     ROUTING_MODE="unknown"
@@ -110,6 +115,20 @@ get_existing_secret_key() {
     fi
 }
 
+setup_python_env() {
+    echo -e "\n${GREEN}Creating Python virtual environment...${NC}"
+    python3 -m venv "$VENV_DIR"
+    "$VENV_PIP" install --upgrade pip
+    if [ -f "$WHEEL_FILE" ]; then
+        "$VENV_PIP" install "$WHEEL_FILE"
+    fi
+    if [ ! -f "$INSTALL_DIR/requirements.txt" ]; then
+        echo -e "${RED}requirements.txt not found in $INSTALL_DIR${NC}"
+        exit 1
+    fi
+    "$VENV_PIP" install -r "$INSTALL_DIR/requirements.txt"
+}
+
 print_routing_summary() {
     echo -e "\n${BLUE}=========================================${NC}"
     echo -e "${BLUE}Postfix sender routing (existing config)${NC}"
@@ -153,23 +172,6 @@ if ! systemctl is-active --quiet postfix 2>/dev/null; then
     echo -e "${YELLOW}Warning: Postfix service is not running. Start it after configuration.${NC}"
 fi
 
-echo -e "\n${GREEN}Installing Flask-Login...${NC}"
-if [ -f "$WHEEL_FILE" ]; then
-    pip3 install "$WHEEL_FILE"
-else
-    echo -e "${YELLOW}Flask-Login wheel not found in deploy/, attempting online install...${NC}"
-    pip3 install flask-login || {
-        echo -e "${RED}Failed to install Flask-Login. Please download the wheel manually.${NC}"
-        exit 1
-    }
-fi
-
-echo -e "\n${GREEN}Installing Flask-WTF (CSRF)...${NC}"
-pip3 install flask-wtf || {
-    echo -e "${RED}Failed to install Flask-WTF.${NC}"
-    exit 1
-}
-
 echo -e "\n${GREEN}Creating application user...${NC}"
 useradd -r -U -s /sbin/nologin -d "$INSTALL_DIR" "$APP_USER" 2>/dev/null || true
 
@@ -183,8 +185,13 @@ if [ ! -d "$REPO_ROOT/templates" ] || [ ! -d "$REPO_ROOT/static" ] || [ ! -d "$R
     echo -e "${RED}Repository layout is incomplete under $REPO_ROOT${NC}"
     exit 1
 fi
+if [ ! -f "$REQUIREMENTS_FILE" ]; then
+    echo -e "${RED}Source file not found: $REQUIREMENTS_FILE${NC}"
+    exit 1
+fi
 mkdir -p "$INSTALL_DIR"/{templates,static,deploy}
 cp "$REPO_ROOT/app.py" "$INSTALL_DIR/"
+cp "$REQUIREMENTS_FILE" "$INSTALL_DIR/"
 cp -r "$REPO_ROOT/templates"/. "$INSTALL_DIR/templates/"
 cp -r "$REPO_ROOT/static"/. "$INSTALL_DIR/static/"
 cp "$REPO_ROOT/deploy/nginx-https.conf" "$INSTALL_DIR/deploy/"
@@ -192,6 +199,7 @@ cp "$REPO_ROOT/deploy/postfix-admin.service" "$INSTALL_DIR/deploy/"
 cp "$REPO_ROOT/deploy/install.sh" "$INSTALL_DIR/deploy/"
 cp "$REPO_ROOT/deploy/uninstall.sh" "$INSTALL_DIR/deploy/"
 cp "$REPO_ROOT/deploy/update.sh" "$INSTALL_DIR/deploy/" 2>/dev/null || true
+setup_python_env
 
 echo -e "\n${GREEN}Checking Postfix sender routing files...${NC}"
 detect_postfix_routing || true
@@ -255,7 +263,7 @@ Group=root
 WorkingDirectory=$INSTALL_DIR
 Environment="SECRET_KEY=$SECRET_KEY"
 Environment="USERS_FILE=$INSTALL_DIR/users.json"
-ExecStart=/usr/bin/gunicorn -w 4 -b 127.0.0.1:8000 app:app
+ExecStart=$VENV_GUNICORN -w 4 -b 127.0.0.1:8000 app:app
 Restart=always
 RestartSec=10
 
@@ -331,7 +339,7 @@ if [[ "$CREATE_ADMIN" =~ ^[Yy]$ ]]; then
     cd "$INSTALL_DIR"
     export FLASK_APP=app.py
     export USERS_FILE="$INSTALL_DIR/users.json"
-    flask create-user
+    "$VENV_FLASK" create-user
     chown "$APP_USER:$APP_GROUP" "$INSTALL_DIR/users.json"
     echo -e "${GREEN}Admin user created successfully!${NC}"
 else

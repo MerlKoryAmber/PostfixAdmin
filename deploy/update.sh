@@ -27,6 +27,8 @@ UPDATE_APP=false
 UPDATE_TEMPLATES=false
 UPDATE_STATIC=false
 UPDATE_DEPLOY=false
+VENV_DIR="$INSTALL_DIR/venv"
+VENV_PIP="$VENV_DIR/bin/pip"
 
 require_command() {
     local cmd="$1"
@@ -47,11 +49,18 @@ resolve_source_dir() {
 }
 
 validate_source_tree() {
-    if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/app.py" ] || [ ! -d "$SOURCE_DIR/templates" ] || [ ! -d "$SOURCE_DIR/static" ] || [ ! -d "$SOURCE_DIR/deploy" ]; then
+    if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/app.py" ] || [ ! -f "$SOURCE_DIR/requirements.txt" ] || [ ! -d "$SOURCE_DIR/templates" ] || [ ! -d "$SOURCE_DIR/static" ] || [ ! -d "$SOURCE_DIR/deploy" ]; then
         echo -e "${RED}Downloaded source tree is incomplete.${NC}"
         echo -e "${YELLOW}Source dir checked:${NC} ${SOURCE_DIR:-<unset>}"
         exit 1
     fi
+}
+
+setup_python_env() {
+    echo -e "\n${GREEN}Updating Python virtual environment...${NC}"
+    python3 -m venv "$VENV_DIR"
+    "$VENV_PIP" install --upgrade pip
+    "$VENV_PIP" install -r "$INSTALL_DIR/requirements.txt"
 }
 
 echo -e "${BLUE}=========================================${NC}"
@@ -72,6 +81,7 @@ if [ ! -d "$INSTALL_DIR" ]; then
 fi
 
 require_command curl
+require_command python3
 
 # Выбор режима обновления
 echo ""
@@ -207,6 +217,10 @@ if [ "$UPDATE_ALL" = true ] || [ "$UPDATE_APP" = true ]; then
     fi
 fi
 
+if [ -f "$SOURCE_DIR/requirements.txt" ]; then
+    cp "$SOURCE_DIR/requirements.txt" "$INSTALL_DIR/requirements.txt"
+fi
+
 if [ "$UPDATE_ALL" = true ] || [ "$UPDATE_TEMPLATES" = true ]; then
     echo -e "\n${GREEN}Updating templates...${NC}"
     if [ -d "$SOURCE_DIR/templates" ]; then
@@ -246,6 +260,8 @@ if [ "$UPDATE_ALL" = true ] || [ "$UPDATE_DEPLOY" = true ]; then
         echo -e "${YELLOW}deploy/ not found in repository. Skipping.${NC}"
     fi
 fi
+
+setup_python_env
 
 # 5. Обновление прав
 echo -e "\n${GREEN}Updating permissions...${NC}"
