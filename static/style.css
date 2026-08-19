@@ -40,6 +40,28 @@ body {
     color: var(--text) !important;
 }
 
+/* Override Bootstrap light defaults for dark theme */
+.card {
+    background: var(--bg-card) !important;
+    border-color: var(--border) !important;
+}
+
+.card-header {
+    background: transparent;
+    border-color: var(--border) !important;
+}
+
+.form-control,
+.form-select {
+    background: var(--bg-muted) !important;
+    color: var(--text) !important;
+    border-color: var(--border) !important;
+}
+
+.form-control::placeholder {
+    color: var(--text-muted) !important;
+}
+
 /* --- App shell + sidebar layout --- */
 body.has-sidebar {
     margin: 0;
