@@ -115,6 +115,11 @@ get_existing_secret_key() {
     fi
 }
 
+port_is_listening() {
+    local port="$1"
+    ss -tln "( sport = :$port )" | awk 'NR > 1 { found = 1 } END { exit(found ? 0 : 1) }'
+}
+
 setup_python_env() {
     echo -e "\n${GREEN}Creating Python virtual environment...${NC}"
     python3 -m venv "$VENV_DIR"
@@ -316,10 +321,21 @@ else
 fi
 
 echo -e "\n${GREEN}Checking listening ports...${NC}"
-if ss -tlnp | grep ':443 ' && ss -tlnp | grep ':8000 '; then
+PORT_443_OK=false
+PORT_8000_OK=false
+if port_is_listening 443; then
+    PORT_443_OK=true
+fi
+if port_is_listening 8000; then
+    PORT_8000_OK=true
+fi
+if [ "$PORT_443_OK" = true ] && [ "$PORT_8000_OK" = true ]; then
     echo -e "${GREEN}Both ports 443 and 8000 are listening.${NC}"
 else
-    echo -e "${RED}Port missing! Something went wrong.${NC}"
+    echo -e "${RED}Port check failed.${NC}"
+    [ "$PORT_443_OK" = false ] && echo -e "${YELLOW}Port 443 is not listening.${NC}"
+    [ "$PORT_8000_OK" = false ] && echo -e "${YELLOW}Port 8000 is not listening.${NC}"
+    ss -tln | grep -E ':443|:8000' || true
 fi
 
 # Проверка Gunicorn
