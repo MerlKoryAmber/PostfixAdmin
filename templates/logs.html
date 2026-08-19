@@ -52,7 +52,7 @@
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span>Файл: /var/log/maillog</span>
-        <input type="search" class="form-control form-control-sm" style="max-width: 260px;"
+        <input type="search" class="form-control form-control-sm"
                placeholder="Живой фильтр по показанным…"
                data-filter-table="#logsTable">
         <small class="text-muted">Показано записей: {{ logs|length }}</small>
@@ -62,11 +62,11 @@
             <table class="table table-hover table-striped mb-0" id="logsTable">
                 <thead>
                     <tr>
-                        <th style="width: 120px;">Time</th>
-                        <th style="width: 180px;">From</th>
-                        <th style="width: 180px;">To</th>
-                        <th style="width: 90px;">Status</th>
-                        <th style="width: 200px;">Relay</th>
+                        <th>Time</th>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>Status</th>
+                        <th>Relay</th>
                         <th>Raw Message</th>
                     </tr>
                 </thead>
@@ -88,7 +88,7 @@
                             {% endif %}
                         </td>
                         <td><small>{{ log.relay }}</small></td>
-                        <td class="small text-muted">{{ log.raw }}</td>
+                        <td class="small text-muted raw-log" title="{{ log.raw }}">{{ log.raw }}</td>
                     </tr>
                     {% else %}
                     <tr>

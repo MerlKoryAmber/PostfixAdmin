@@ -16,7 +16,7 @@
             <tbody>
                 {% for key, value in headers.items() %}
                 <tr>
-                    <th style="width: 200px;">{{ key }}</th>
+                    <th>{{ key }}</th>
                     <td>{{ value }}</td>
                 </tr>
                 {% endfor %}
@@ -25,7 +25,7 @@
 
         {% if body %}
         <h5 class="mt-4 mb-3">Message Body</h5>
-        <pre class="bg-light p-3 border rounded" style="max-height: 400px; overflow-y: auto;">{{ body }}</pre>
+        <pre class="bg-light p-3 border rounded raw-message" style="max-height: 400px; overflow-y: auto;">{{ body }}</pre>
         {% endif %}
     </div>
 </div>

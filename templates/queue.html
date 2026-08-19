@@ -108,7 +108,7 @@
         <span>Письма в очереди</span>
         <form method="GET" action="{{ url_for('view_queue') }}" class="d-flex gap-2 align-items-center">
             <input type="search" name="q" value="{{ q }}" class="form-control form-control-sm"
-                   placeholder="Поиск: ID, отправитель, получатель…" style="min-width: 260px;">
+                   placeholder="Поиск: ID, отправитель, получатель…">
             <select name="per_page" class="form-select form-select-sm" style="width: auto;"
                     onchange="this.form.submit()">
                 {% for n in [25, 50, 100, 200] %}
