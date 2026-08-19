@@ -62,6 +62,7 @@ rm -f /etc/systemd/system/postfix-admin.service
 systemctl daemon-reload
 
 echo -e "\n${GREEN}Removing application directory...${NC}"
+# Removes /opt/postfix-admin (app, venv, templates, static). DESIGN.md/vendor/.cursor are never installed.
 rm -rf "$INSTALL_DIR"
 
 echo -e "\n${GREEN}Removing Nginx configuration...${NC}"

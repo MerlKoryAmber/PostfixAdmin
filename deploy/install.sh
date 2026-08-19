@@ -195,6 +195,8 @@ if [ ! -f "$REQUIREMENTS_FILE" ]; then
     exit 1
 fi
 mkdir -p "$INSTALL_DIR"/{templates,static,deploy}
+# Runtime only: app + templates + static + requirements + deploy samples.
+# Do not copy DESIGN.md, vendor/, or .cursor/ — those are repo/dev assets.
 cp "$REPO_ROOT/app.py" "$INSTALL_DIR/"
 cp "$REQUIREMENTS_FILE" "$INSTALL_DIR/"
 cp -r "$REPO_ROOT/templates"/. "$INSTALL_DIR/templates/"

@@ -105,8 +105,8 @@ echo ""
 echo -e "${YELLOW}Update mode:${NC}"
 echo "  1) Update all files"
 echo "  2) Update app.py only"
-echo "  3) Update templates only"
-echo "  4) Update static files only"
+echo "  3) Update templates only (also refreshes static CSS/JS)"
+echo "  4) Update static files only (also refreshes templates for cache-bust)"
 echo "  5) Update deploy scripts only"
 read -p "Select [1-5]: " UPDATE_MODE
 
@@ -221,18 +221,15 @@ if [ -f "$SOURCE_DIR/requirements.txt" ]; then
     cp "$SOURCE_DIR/requirements.txt" "$INSTALL_DIR/requirements.txt"
 fi
 
-if [ "$UPDATE_ALL" = true ] || [ "$UPDATE_TEMPLATES" = true ]; then
-    echo -e "\n${GREEN}Updating templates...${NC}"
+# Templates (cache-bust query on style.css) and static CSS must stay in sync.
+if [ "$UPDATE_ALL" = true ] || [ "$UPDATE_TEMPLATES" = true ] || [ "$UPDATE_STATIC" = true ]; then
+    echo -e "\n${GREEN}Updating templates and static files...${NC}"
     if [ -d "$SOURCE_DIR/templates" ]; then
         cp -a "$SOURCE_DIR/templates"/. "$INSTALL_DIR/templates/"
         echo -e "${GREEN}Templates updated.${NC}"
     else
         echo -e "${YELLOW}templates/ not found in repository. Skipping.${NC}"
     fi
-fi
-
-if [ "$UPDATE_ALL" = true ] || [ "$UPDATE_STATIC" = true ]; then
-    echo -e "\n${GREEN}Updating static files...${NC}"
     if [ -d "$SOURCE_DIR/static" ]; then
         cp -a "$SOURCE_DIR/static"/. "$INSTALL_DIR/static/"
         echo -e "${GREEN}Static files updated.${NC}"
