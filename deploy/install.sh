@@ -222,6 +222,9 @@ fi
 chmod 600 "$TLS_KEY"
 chmod 644 "$TLS_CERT"
 
+echo -e "\n${GREEN}Generating nginx IP allow config...${NC}"
+ensure_nginx_allow_conf "$INSTALL_DIR/nginx-allow.conf" "$APP_USER:$APP_GROUP"
+
 echo -e "\n${GREEN}Configuring Nginx...${NC}"
 rm -f /etc/nginx/conf.d/default.conf
 cp "$INSTALL_DIR/deploy/nginx-https.conf" /etc/nginx/conf.d/postfix-admin.conf
@@ -268,9 +271,6 @@ chown -R "$APP_USER:$APP_GROUP" "$INSTALL_DIR"
 
 ensure_json_file "$INSTALL_DIR/users.json" "{}" "$APP_USER:$APP_GROUP" 600
 ensure_json_file "$INSTALL_DIR/ip_whitelist.json" "[]" "$APP_USER:$APP_GROUP" 640
-
-echo -e "\n${GREEN}Generating nginx IP allow config...${NC}"
-ensure_nginx_allow_conf "$INSTALL_DIR/nginx-allow.conf" "$APP_USER:$APP_GROUP"
 
 echo -e "\n${GREEN}Configuring log file access...${NC}"
 if getent group adm > /dev/null; then
