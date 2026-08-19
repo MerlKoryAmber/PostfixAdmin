@@ -1,37 +1,41 @@
 :root {
-    --bg-page: #0b1220;
-    --bg-card: #111827;
-    --bg-muted: #0f172a;
-    --bg-table: #111827;
-    --bg-table-stripe: rgba(255, 255, 255, 0.03);
-    --bg-table-hover: rgba(76, 201, 216, 0.08);
-    --text: #e5e7eb;
-    --text-dark: #f8fafc;
-    --text-muted: #94a3b8;
-    --border: rgba(148, 163, 184, 0.18);
-    --border-dark: rgba(148, 163, 184, 0.1);
-    --brand-primary: #4cc9d8;
-    --radius: 14px;
-    --radius-sm: 10px;
-    --shadow-sm: 0 10px 30px rgba(0, 0, 0, 0.25);
-    --bg-nav-item: rgba(76, 201, 216, 0.12);
+    --bg-page: #000000;
+    --bg-card: #15181e;
+    --bg-muted: #1f232b;
+    --bg-table: #15181e;
+    --bg-table-stripe: #1f232b;
+    --bg-table-hover: rgba(20, 198, 203, 0.1);
+    --text: #ffffff;
+    --text-dark: #ffffff;
+    --text-muted: #b2b6bd;
+    --border: rgba(178, 182, 189, 0.14);
+    --border-dark: rgba(178, 182, 189, 0.08);
+    --brand-primary: #14c6cb;
+    --brand-primary-hover: #12b6bb;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow-sm: none;
+    --bg-nav-item: rgba(20, 198, 203, 0.12);
     --sidebar-width: 16.5rem;
+    --font-sans: Inter, "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", monospace;
 }
 
 :root[data-theme="light"] {
-    --bg-page: #f6f7fb;
+    --bg-page: #f4f5f7;
     --bg-card: #ffffff;
-    --bg-muted: #f1f3f9;
+    --bg-muted: #eef0f3;
     --bg-table: #ffffff;
-    --bg-table-stripe: rgba(15, 23, 42, 0.03);
-    --bg-table-hover: rgba(61, 184, 198, 0.07);
-    --text: #0f172a;
-    --text-dark: #0f172a;
-    --text-muted: #475569;
+    --bg-table-stripe: #eef0f3;
+    --bg-table-hover: rgba(14, 143, 148, 0.08);
+    --text: #0b0c0f;
+    --text-dark: #0b0c0f;
+    --text-muted: #3b3d45;
     --border: rgba(15, 23, 42, 0.14);
     --border-dark: rgba(15, 23, 42, 0.08);
-    --bg-nav-item: rgba(61, 184, 198, 0.1);
-    --shadow-sm: 0 10px 30px rgba(15, 23, 42, 0.08);
+    --brand-primary: #0e8f94;
+    --brand-primary-hover: #0c7c80;
+    --bg-nav-item: rgba(14, 143, 148, 0.1);
 }
 
 *,
@@ -49,6 +53,9 @@ body {
 body {
     margin: 0;
     color: var(--text);
+    font-family: var(--font-sans);
+    font-weight: 500;
+    letter-spacing: -0.05px;
 }
 
 body.has-sidebar {
@@ -69,7 +76,7 @@ body.has-sidebar {
 .sidebar {
     flex: 0 0 var(--sidebar-width);
     width: var(--sidebar-width);
-    background: #141413;
+    background: var(--bg-card);
     border-right: 1px solid var(--border);
     padding: 1.25rem 1rem 1rem;
     display: flex;
@@ -147,9 +154,9 @@ body.has-sidebar {
 }
 
 .side-link.active {
-    background: rgba(76, 201, 216, 0.16);
+    background: var(--bg-nav-item);
     color: var(--brand-primary) !important;
-    font-weight: 700;
+    font-weight: 600;
 }
 
 .side-link-quiet {
@@ -240,8 +247,9 @@ body.has-sidebar {
 
 .page-title {
     margin: 0;
-    font-size: 1.6rem;
-    font-weight: 700;
+    font-size: 1.375rem;
+    font-weight: 600;
+    letter-spacing: -0.4px;
     color: var(--text-dark);
 }
 
@@ -264,12 +272,37 @@ body.has-sidebar {
     text-transform: uppercase;
 }
 
+.btn-primary {
+    background-color: var(--brand-primary) !important;
+    border-color: var(--brand-primary) !important;
+    color: #fff !important;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+}
+
+.btn-primary:hover,
+.btn-primary:focus {
+    background-color: var(--brand-primary-hover) !important;
+    border-color: var(--brand-primary-hover) !important;
+}
+
+.btn-secondary,
+.btn-outline-secondary {
+    border-radius: var(--radius-sm);
+}
+
+.btn-secondary {
+    background-color: var(--bg-muted) !important;
+    border-color: var(--border) !important;
+    color: var(--text-dark) !important;
+}
+
 .card {
     background: var(--bg-card) !important;
     color: var(--text) !important;
     border: 1px solid var(--border) !important;
     border-radius: var(--radius);
-    box-shadow: var(--shadow-sm);
+    box-shadow: none;
 }
 
 .card-header,
@@ -299,7 +332,7 @@ body.has-sidebar {
 .form-control:focus,
 .form-select:focus {
     border-color: var(--brand-primary) !important;
-    box-shadow: 0 0 0 0.2rem rgba(76, 201, 216, 0.18) !important;
+    box-shadow: 0 0 0 0.2rem rgba(20, 198, 203, 0.35) !important;
 }
 
 .table {
@@ -337,7 +370,14 @@ body.has-sidebar {
     max-width: 100%;
 }
 
+.table-responsive .table {
+    min-width: 100%;
+}
+
 .raw-log {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 400;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
@@ -380,7 +420,7 @@ pre {
 }
 
 .badge-status-neutral {
-    background: rgba(76, 201, 216, 0.16);
+    background: rgba(20, 198, 203, 0.16);
     color: #7dd3fc;
 }
 
@@ -462,8 +502,8 @@ pre {
 }
 
 .alert-info {
-    background: rgba(76, 201, 216, 0.12);
-    border-color: rgba(76, 201, 216, 0.28);
+    background: rgba(20, 198, 203, 0.12);
+    border-color: rgba(20, 198, 203, 0.28);
     color: var(--text);
 }
 
@@ -513,9 +553,9 @@ body.login-body .page-container {
 }
 
 .login-logo {
-    width: 72px;
-    height: 72px;
-    max-width: 72px;
+    width: 64px;
+    height: 64px;
+    max-width: 64px;
     margin: 0 auto 1rem;
     display: block;
 }
@@ -523,9 +563,9 @@ body.login-body .page-container {
 .login-card .card-header h1 {
     margin: 0;
     font-size: 1.25rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: -0.4px;
+    text-transform: none;
     color: var(--text-dark);
 }
 

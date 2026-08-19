@@ -206,6 +206,10 @@ deploy/
   postfix-admin.service
 ```
 
+## Интерфейс (DESIGN.md)
+
+Визуальный язык панели задан в корневом [`DESIGN.md`](DESIGN.md). Каталог вдохновений: [VoltAgent/awesome-claude-design](https://github.com/VoltAgent/awesome-claude-design), локальная копия в `vendor/awesome-claude-design/` (взят HashiCorp-inspired набор для infra/ops). Агенты Cursor читают skill `.cursor/skills/awesome-claude-design/` и правило `.cursor/rules/design.mdc`.
+
 ## Обслуживание
 
 ```bash
