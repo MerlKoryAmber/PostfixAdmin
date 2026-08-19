@@ -1,145 +1,123 @@
-# Postfix Admin
+# Postfix Admin (InterROS)
 
-Веб-панель для администрирования уже установленного Postfix без отдельной базы данных. Приложение работает с файлами в `/etc/postfix`, читает `/var/log/maillog`, вызывает `postmap`, `postfix check`, `postfix reload` и умеет управлять очередью.
+Веб-панель для уже установленного Postfix. Отдельной БД нет: читает и пишет файлы в `/etc/postfix`, хвост `/var/log/maillog`, вызывает `postmap`, `postfix check`, `postfix reload`, `postqueue` / `postsuper`.
 
-Проект рассчитан на внутреннюю сеть: трафик идёт через Nginx по HTTPS, а доступ можно ограничить whitelist-ом IP.
+Рассчитана на внутреннюю сеть: снаружи только HTTPS (Nginx :443), Gunicorn слушает `127.0.0.1:8000`. Доступ можно закрыть IP whitelist.
 
-## Что умеет
+Сервис крутится от **root**: нужны права на `main.cf`, карты, `postmap`, `postfix reload`, `systemctl reload nginx`.
+
+## Возможности
 
 | Раздел | Назначение |
 |--------|------------|
-| `Dashboard` | Краткий статус Postfix, очереди, routing rules и статистики |
-| `Configuration` | Просмотр и изменение ключевых параметров `main.cf` |
-| `Transport` | Редактирование `/etc/postfix/transport` для маршрутизации по домену получателя |
-| `Routing` | Маршрутизация по отправителю: relayhost/transport mode, SASL, TLS, bind IP |
-| `Relay Hosts` | Просмотр используемых relay hosts, проверка порта, массовая замена |
-| `Queue` | Просмотр очереди и операции `hold`, `release`, `requeue`, `delete` |
-| `Statistics` | Сводка по `/var/log/maillog` |
-| `Logs` | Последние строки maillog с фильтрами |
-| `Users` | Учётные записи панели |
-| `IP Whitelist` | Разрешённые адреса и сети |
+| Дашборд | Статус Postfix, очередь, routing, краткая статистика |
+| Конфигурация | Ключевые параметры `main.cf` |
+| Транспорт | `/etc/postfix/transport` — маршрут по домену получателя |
+| Маршрутизация | Sender-dependent: relayhost или transport, SASL, TLS, bind IP |
+| Релей-хосты | Уникальные relay, проверка порта, массовая замена |
+| Очередь | hold / release / requeue / delete |
+| Статистика | Сводка по `maillog` |
+| Логи | Записи за **последние 24 часа**, фильтры по всему окну, пагинация (50/100/200 на страницу) |
+| Пользователи | Учётные записи панели |
+| IP Whitelist | `allow` в Nginx; пустой список = доступ всем |
 
-Роль `user` имеет доступ на чтение к большей части интерфейса. Изменение конфигурации, очереди, пользователей и whitelist доступно только `admin`.
+Роль `user` — в основном чтение. Менять конфиг, очередь, пользователей и whitelist может только `admin`.
 
 ## Требования
 
-- CentOS Stream 9 / Rocky Linux 9
-- Уже установленный и настроенный Postfix
-- Root для установки и запуска панели
-- Nginx, Gunicorn, Python 3
+- CentOS Stream 9 или Rocky Linux 9 (скрипт ставит пакеты через `dnf`)
+- Postfix уже установлен и работает как почтовый сервер
+- Root
+- Открытые **443** (и **80** только для редиректа на HTTPS)
+- Git, чтобы клонировать репозиторий на сервер
 
-Причина запуска от `root`: приложение должно читать и изменять файлы Postfix, выполнять `postmap`, `postfix reload` и `systemctl reload nginx`.
+Скрипт сам поставит Python 3, Nginx и зависимости. Gunicorn ставится в venv `/opt/postfix-admin/venv`, не из системного rpm.
 
-## Архитектура
-
-```text
-Browser -> HTTPS :443 -> Nginx -> HTTP 127.0.0.1:8000 -> Gunicorn -> Flask app.py
-                                                          |
-                                                          +-> /etc/postfix/main.cf
-                                                          +-> /etc/postfix/transport
-                                                          +-> /etc/postfix/sender_transport
-                                                          +-> /etc/postfix/sender_sasl_passwd
-                                                          +-> /var/log/maillog
-```
-
-Основные пути на сервере:
-
-| Путь | Назначение |
-|------|------------|
-| `/opt/postfix-admin` | Код панели |
-| `/opt/postfix-admin/users.json` | Пользователи |
-| `/opt/postfix-admin/ip_whitelist.json` | Белый список IP |
-| `/opt/postfix-admin/nginx-allow.conf` | Генерируемые `allow`/`deny` для Nginx |
-| `/etc/systemd/system/postfix-admin.service` | Рабочий systemd unit |
-| `/etc/nginx/conf.d/postfix-admin.conf` | Конфиг Nginx |
+---
 
 ## Установка
 
+Все команды — **на целевом сервере, от root**. Скрипт должен видеть корень репозитория (`app.py` рядом с каталогом `deploy/`). Не копируйте на сервер один только `install.sh`.
+
+### 1. Клон и запуск
+
 ```bash
+cd /usr/local/src
 git clone https://github.com/MerlKoryAmber/PostfixAdmin.git
 cd PostfixAdmin
-chmod +x deploy/install.sh
+chmod +x deploy/install.sh deploy/update.sh deploy/uninstall.sh
 sudo ./deploy/install.sh
 ```
 
-Что делает `deploy/install.sh`:
+Если репозиторий уже лежит в другом каталоге — `cd` туда и тот же `sudo ./deploy/install.sh`.
 
-1. Устанавливает системные пакеты через `dnf`.
-2. Копирует приложение в `/opt/postfix-admin`.
-3. Не перезаписывает существующие sender maps Postfix, а создаёт их только при отсутствии.
-4. Определяет активный режим sender routing из `main.cf`.
-5. Генерирует self-signed TLS-сертификат для Nginx.
-6. Создаёт и включает systemd unit `postfix-admin`.
-7. Предлагает создать первого администратора.
+### 2. Что делает `deploy/install.sh`
 
-После установки панель доступна по адресу:
+1. `dnf`: epel, python3, postfix, nginx, openssl, nmap-ncat, curl и связанное.
+2. Системный пользователь `postfixadmin` (nologin). Код панели — от него по файлам; **процесс Gunicorn — User=root**.
+3. Копирует в `/opt/postfix-admin` только runtime: `app.py`, `templates/`, `static/`, `requirements.txt`, скрипты `deploy/`. Каталоги `vendor/`, `.cursor/`, `DESIGN.md` на хост не кладутся.
+4. Создаёт venv `/opt/postfix-admin/venv` и ставит пакеты из `requirements.txt` (Flask 3, flask-login, flask-wtf, gunicorn).
+5. Не затирает существующие `/etc/postfix/sender_transport` и `sender_sasl_passwd`; пустые файлы создаёт только если их нет, затем `postmap`.
+6. Смотрит `main.cf` (`postconf`) и печатает режим sender routing.
+7. TLS: если **оба** файла `/etc/nginx/ssl/postfix-admin.crt` и `.key` уже есть — оставляет. Если есть только один — **остановка**. Если нет ни одного — self-signed на 10 лет, CN = первый IP хоста.
+8. Пишет `/opt/postfix-admin/nginx-allow.conf` (если файла нет: `allow all`), кладёт Nginx-конфиг в `/etc/nginx/conf.d/postfix-admin.conf`, удаляет `default.conf`, `nginx -t`.
+9. systemd unit `/etc/systemd/system/postfix-admin.service`: Gunicorn из venv, `127.0.0.1:8000`, `USERS_FILE`, `SECRET_KEY` (новый или прежний, если unit уже был).
+10. Сохраняет существующие `users.json` и `ip_whitelist.json`.
+11. `firewall-cmd` — сервисы http/https (если firewalld есть).
+12. `systemctl enable --now postfix-admin`, **restart** nginx.
+13. Спрашивает, создать ли первого admin (`venv/bin/flask create-user`).
+
+Повторный запуск install с тем же деревом — переустановка поверх; ключ и TLS при полных парах не сбрасываются.
+
+### 3. После скрипта
 
 ```text
-https://<server-ip>
+https://<IP-сервера>
 ```
 
-Если используется self-signed сертификат, браузер покажет предупреждение. Для production замените `/etc/nginx/ssl/postfix-admin.crt` и `/etc/nginx/ssl/postfix-admin.key` на свои сертификаты и перезагрузите Nginx.
+Self-signed — предупреждение браузера. Для нормального TLS замените пару в `/etc/nginx/ssl/` и:
 
-## Управление пользователями из CLI
+```bash
+nginx -t && systemctl reload nginx
+```
 
-Если администратора не создали во время установки:
+Создать администратора, если на шаге 13 ответили нет:
 
 ```bash
 cd /opt/postfix-admin
 export FLASK_APP=app.py
 export USERS_FILE=/opt/postfix-admin/users.json
-flask create-user
-flask list-users
+/opt/postfix-admin/venv/bin/flask create-user
+/opt/postfix-admin/venv/bin/flask list-users
+chown postfixadmin:postfixadmin /opt/postfix-admin/users.json
+chmod 600 /opt/postfix-admin/users.json
 ```
 
-## Sender Routing
+Системный `flask` без venv не использовать — там не будет зависимостей панели.
 
-Панель читает `main.cf` и выбирает один из двух режимов:
+### 4. Проверка
 
-| Режим | Параметр | Формат записи |
-|------|----------|---------------|
-| `relayhost` (B) | `sender_dependent_relayhost_maps` | `[host]:port` |
-| `transport` (A) | `sender_dependent_default_transport_maps` | `smtp:[host]:port` + опции |
-
-Если заданы оба параметра, приоритет у `transport`.
-
-### Рекомендуемый relayhost mode
-
-```text
-sender_dependent_relayhost_maps = hash:/etc/postfix/sender_transport
-smtp_sender_dependent_authentication = yes
-smtp_sasl_password_maps = hash:/etc/postfix/sender_sasl_passwd
+```bash
+systemctl is-active postfix-admin nginx postfix
+ss -tln | grep -E ':443|:8000'
+curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1/login
+journalctl -u postfix-admin -n 30 --no-pager
 ```
 
-Пример строки:
+Ожидание: 443 и 8000 слушают, gunicorn отвечает редиректом или 200 на `/login`.
 
-```text
-user@example.com    [smtp.provider.com]:587
-```
+### 5. Типичные срывы установки
 
-### Transport mode
+| Симптом | Что смотреть |
+|---------|----------------|
+| `Source file not found: …/app.py` | Запуск не из checkout репозитория |
+| `ModuleNotFoundError: flask_login` | Старый unit без venv; нужен install/update, который ставит `/opt/postfix-admin/venv` |
+| Nginx `-t` fail, нет `nginx-allow.conf` | Скрипт новой версии создаёт файл **до** `nginx -t`; не используйте обрезанный install |
+| 443 не слушает | `systemctl restart nginx`, не только `start` |
+| 403 / пустая страница с другого IP | Непустой whitelist: свой IP должен быть в списке |
+| Только crt или только key | Добить пару вручную; install не генерирует вторую половину поверх обломка |
 
-Используется, когда для отдельных отправителей нужны дополнительные параметры, например TLS level или bind IP.
-
-```text
-sender_dependent_default_transport_maps = hash:/etc/postfix/sender_transport
-```
-
-Пример строки:
-
-```text
-user@example.com    smtp:[smtp.provider.com]:587 smtp_tls_security_level=encrypt
-```
-
-SASL-пароли хранятся в `/etc/postfix/sender_sasl_passwd` с правами `600`.
-
-## Transport Map
-
-Раздел `Transport` управляет `/etc/postfix/transport`, то есть маршрутизацией по домену получателя. Чтобы Postfix реально использовал этот файл, в `main.cf` должен быть настроен `transport_maps`, например:
-
-```text
-transport_maps = hash:/etc/postfix/transport
-```
+---
 
 ## Обновление
 
@@ -147,30 +125,18 @@ transport_maps = hash:/etc/postfix/transport
 sudo /opt/postfix-admin/deploy/update.sh
 ```
 
-Скрипт:
+Скрипт качает [MerlKoryAmber/PostfixAdmin](https://github.com/MerlKoryAmber/PostfixAdmin) (релиз / `main` / тег), бэкап в `/opt/postfix-admin-backup-<дата>`, останавливает сервис, копирует выбранное (всё / только app / templates+static вместе / deploy), обновляет venv по `requirements.txt`, стартует сервис. `users.json` и whitelist не затираются.
 
-- создаёт бэкап в `/opt/postfix-admin-backup-<date>`;
-- скачивает код из GitHub;
-- обновляет `app.py`, шаблоны, статику и deploy-скрипты;
-- перезапускает `postfix-admin`;
-- не затирает `users.json` и `ip_whitelist.json`.
+Live unit `/etc/systemd/system/postfix-admin.service` **не переписывается** (SECRET_KEY). Образец лежит в `/opt/postfix-admin/deploy/postfix-admin.service`.
 
-Важно: `update.sh` специально **не переписывает live systemd unit** в `/etc/systemd/system/postfix-admin.service`, чтобы не потерять рабочий `SECRET_KEY` и runtime-настройки. Актуальный пример unit-файла хранится в `deploy/postfix-admin.service` и копируется только как reference в `/opt/postfix-admin/deploy/postfix-admin.service`.
-
-Если изменился `deploy/nginx-https.conf`, обновите `/etc/nginx/conf.d/postfix-admin.conf` вручную:
+Если в релизе менялся Nginx-шаблон:
 
 ```bash
 cp /opt/postfix-admin/deploy/nginx-https.conf /etc/nginx/conf.d/postfix-admin.conf
 nginx -t && systemctl reload nginx
 ```
 
-## Пример systemd unit
-
-Файл `deploy/postfix-admin.service` является примером. Перед ручной установкой или заменой unit-файла:
-
-- задайте свой случайный `SECRET_KEY`;
-- проверьте путь к `gunicorn`;
-- помните, что сервис должен иметь права на работу с файлами Postfix и на вызовы `postfix`/`postmap`.
+Откат из бэкапа — в хвосте вывода `update.sh`.
 
 ## Удаление
 
@@ -178,50 +144,110 @@ nginx -t && systemctl reload nginx
 sudo /opt/postfix-admin/deploy/uninstall.sh
 ```
 
-Удаляется только панель, её сервис и конфиг Nginx. Сам Postfix и его карты маршрутизации не удаляются.
+Снимает unit, `/opt/postfix-admin`, `postfix-admin.conf` у Nginx. Postfix и `main.cf` не трогает. По запросу: пустые map-файлы панели, TLS-пара, правила firewalld http/https, пользователь `postfixadmin`.
+
+---
+
+## Архитектура
+
+```text
+Браузер --HTTPS:443--> Nginx --127.0.0.1:8000--> gunicorn (venv) --> app.py
+                                                              |
+                                                              +-- /etc/postfix/main.cf
+                                                              +-- /etc/postfix/transport
+                                                              +-- /etc/postfix/sender_transport
+                                                              +-- /etc/postfix/sender_sasl_passwd
+                                                              +-- /var/log/maillog
+```
+
+| Путь | Назначение |
+|------|------------|
+| `/opt/postfix-admin` | Код, venv, json, nginx-allow |
+| `/opt/postfix-admin/users.json` | Пользователи панели (`600`) |
+| `/opt/postfix-admin/ip_whitelist.json` | Белый список IP |
+| `/opt/postfix-admin/nginx-allow.conf` | `allow`/`deny` для Nginx |
+| `/opt/postfix-admin/venv` | Python-зависимости |
+| `/etc/systemd/system/postfix-admin.service` | Рабочий unit |
+| `/etc/nginx/conf.d/postfix-admin.conf` | HTTPS vhost |
+| `/etc/nginx/ssl/postfix-admin.crt` / `.key` | TLS панели |
+
+## Sender routing
+
+Панель смотрит `main.cf`. Если заданы оба map — берётся **transport**.
+
+| Режим | Параметр | Пример значения в карте |
+|------|----------|-------------------------|
+| relayhost (B) | `sender_dependent_relayhost_maps` | `[host]:587` |
+| transport (A) | `sender_dependent_default_transport_maps` | `smtp:[host]:587` плюс опции |
+
+Рекомендуемый relayhost:
+
+```text
+sender_dependent_relayhost_maps = hash:/etc/postfix/sender_transport
+smtp_sender_dependent_authentication = yes
+smtp_sasl_password_maps = hash:/etc/postfix/sender_sasl_passwd
+```
+
+```text
+user@example.com    [smtp.provider.com]:587
+```
+
+Transport, если нужны TLS/bind на отправителя:
+
+```text
+sender_dependent_default_transport_maps = hash:/etc/postfix/sender_transport
+```
+
+```text
+user@example.com    smtp:[smtp.provider.com]:587 smtp_tls_security_level=encrypt
+```
+
+SASL: `/etc/postfix/sender_sasl_passwd`, права `600`.
+
+Раздел «Транспорт» правит `/etc/postfix/transport`. Чтобы Postfix это использовал:
+
+```text
+transport_maps = hash:/etc/postfix/transport
+```
 
 ## Безопасность
 
-- только HTTPS;
-- CSRF на POST-формах;
-- cookie с `Secure`, `HttpOnly`, `SameSite=Lax`;
-- изменения выполняются только через POST;
-- IP клиента берётся из `X-Real-IP`;
-- конфиги записываются атомарно, резервные копии сохраняются как `*.bak`.
+- только HTTPS, HSTS, CSRF на POST;
+- cookie `Secure`, `HttpOnly`, `SameSite=Lax`;
+- IP клиента для whitelist — `X-Real-IP` (его ставит Nginx);
+- конфиги пишутся атомарно, рядом `*.bak`.
 
-Если whitelist пустой, доступ разрешён всем. Как только в нём появляется хотя бы один IP или CIDR-сеть, все остальные адреса получают отказ.
+Пустой whitelist = пускать всех. Любая запись (IP или CIDR) — остальные режутся Nginx.
 
-## Репозиторий
-
-```text
-app.py
-templates/
-static/
-requirements.txt
-deploy/
-  install.sh
-  update.sh
-  uninstall.sh
-  nginx-https.conf
-  postfix-admin.service
-```
-
-## Интерфейс (DESIGN.md)
-
-Визуальный язык панели задан в корневом [`DESIGN.md`](DESIGN.md). Каталог вдохновений: [VoltAgent/awesome-claude-design](https://github.com/VoltAgent/awesome-claude-design), локальная копия в `vendor/awesome-claude-design/` (взят HashiCorp-inspired набор для infra/ops). Агенты Cursor читают skill `.cursor/skills/awesome-claude-design/` и правило `.cursor/rules/design.mdc`.
+Секреты (`SECRET_KEY`, пароли SASL, `users.json`, ключ TLS) в git не класть.
 
 ## Обслуживание
 
 ```bash
 systemctl status postfix-admin
-journalctl -u postfix-admin -n 50
+journalctl -u postfix-admin -n 50 --no-pager
 systemctl restart postfix-admin
 nginx -t && systemctl reload nginx
 ```
 
-Если интерфейс не открывается, проверьте:
+Панель не открывается:
 
-1. что ваш IP разрешён в whitelist;
-2. что `postfix-admin` запущен;
-3. что Nginx слушает `443`;
-4. что Gunicorn слушает `127.0.0.1:8000`.
+1. IP в whitelist (если список не пустой);
+2. `postfix-admin` active;
+3. Nginx слушает 443;
+4. Gunicorn на `127.0.0.1:8000`;
+5. логи: `journalctl -u postfix-admin`, `/var/log/nginx/postfix-admin-error.log`.
+
+## Состав репозитория (для установки)
+
+```text
+app.py
+requirements.txt
+templates/
+static/
+deploy/install.sh
+deploy/update.sh
+deploy/uninstall.sh
+deploy/nginx-https.conf
+deploy/postfix-admin.service
+```
