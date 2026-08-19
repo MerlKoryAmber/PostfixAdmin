@@ -81,7 +81,7 @@
                                 <span class="badge badge-status-ok">{{ log.status }}</span>
                             {% elif 'deferred' in log.status %}
                                 <span class="badge badge-status-neutral">{{ log.status }}</span>
-                            {% elif 'bounced' in log.status or 'error' in log.status %}
+                            {% elif 'bounced' in log.status or 'error' in log.status or 'timeout' in log.status or 'lost' in log.status %}
                                 <span class="badge badge-status-off">{{ log.status }}</span>
                             {% else %}
                                 <small>{{ log.status }}</small>

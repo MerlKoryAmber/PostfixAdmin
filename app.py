@@ -663,19 +663,110 @@ def parse_transport():
                 entries.append({'domain': parts[0], 'destination': parts[1]})
     return entries
 
+# Traditional syslog: "Aug 19 14:20:01" is 15 chars. ISO-8601 if rsyslog uses it.
+_SYSLOG_TS_RE = re.compile(
+    r'^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}|'
+    r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)'
+)
+# After postfix/service[pid]: queue id (hex or long-queue-id) or NOQUEUE.
+_POSTFIX_QID_RE = re.compile(
+    r'postfix/[A-Za-z0-9/_-]+\[\d+\]:\s+(NOQUEUE|[A-Za-z0-9]{5,32}):'
+)
+_LOG_FROM_RE = re.compile(r'from=<([^>]*)>')
+_LOG_TO_RE = re.compile(r'to=<([^>]*)>')
+_LOG_STATUS_RE = re.compile(r'status=([^\s,]+)')
+_LOG_RELAY_RE = re.compile(r'relay=([^\s,]+)')
+_LOG_CONV_HOST_RE = re.compile(r'conversation with ([^\s\[]+)')
+_LOG_CONNECT_TO_RE = re.compile(r'connect to ([^\s\[]+)')
+LOG_PARSE_CONTEXT_LINES = 2000
+
+
 def parse_log_line(line):
-    result = {'timestamp': '', 'from': '', 'to': '', 'status': '', 'relay': '', 'raw': line}
-    if len(line) >= 15:
+    """Parse one syslog line. from=/to= live on different Postfix lines — see parse_maillog_lines."""
+    line = (line or '').rstrip('\n')
+    result = {
+        'timestamp': '', 'queue_id': '', 'from': '', 'to': '',
+        'status': '', 'relay': '', 'raw': line,
+    }
+    ts = _SYSLOG_TS_RE.match(line)
+    if ts:
+        result['timestamp'] = ts.group(1).strip()
+    elif len(line) >= 15:
         result['timestamp'] = line[:15].strip()
-    to_match = re.search(r'to=<([^>]+)>', line)
-    if to_match: result['to'] = to_match.group(1)
-    from_match = re.search(r'from=<([^>]+)>', line)
-    if from_match: result['from'] = from_match.group(1)
-    status_match = re.search(r'status=(\S+)', line)
-    if status_match: result['status'] = status_match.group(1)
-    relay_match = re.search(r'relay=([^\s,]+)', line)
-    if relay_match: result['relay'] = relay_match.group(1)
+    qid = _POSTFIX_QID_RE.search(line)
+    if qid:
+        result['queue_id'] = qid.group(1)
+    from_match = _LOG_FROM_RE.search(line)
+    if from_match:
+        result['from'] = from_match.group(1)
+    to_match = _LOG_TO_RE.search(line)
+    if to_match:
+        result['to'] = to_match.group(1)
+    status_match = _LOG_STATUS_RE.search(line)
+    if status_match:
+        result['status'] = status_match.group(1).rstrip('.,;')
+    lower = line.lower()
+    if not result['status']:
+        if 'timed out' in lower or 'timeout' in lower:
+            result['status'] = 'timeout'
+        elif 'lost connection' in lower:
+            result['status'] = 'lost connection'
+    relay_match = _LOG_RELAY_RE.search(line)
+    if relay_match:
+        result['relay'] = relay_match.group(1)
+    elif not result['relay']:
+        conv = _LOG_CONV_HOST_RE.search(line) or _LOG_CONNECT_TO_RE.search(line)
+        if conv:
+            result['relay'] = conv.group(1)
     return result
+
+
+def _merge_qid_state(state, entry):
+    if entry['from']:
+        state['from'] = entry['from']
+    if entry['to']:
+        if not state['to']:
+            state['to'] = entry['to']
+        elif entry['to'] not in state['to'].split(', '):
+            state['to'] = state['to'] + ', ' + entry['to']
+    if entry['relay']:
+        state['relay'] = entry['relay']
+
+
+def _apply_qid_state(entry, state):
+    if not entry['from']:
+        entry['from'] = state.get('from', '')
+    if not entry['to']:
+        entry['to'] = state.get('to', '')
+    if not entry['relay']:
+        entry['relay'] = state.get('relay', '')
+    return entry
+
+
+def parse_maillog_lines(lines):
+    """Correlate Postfix syslog by queue id so timeout lines inherit from=/to=."""
+    by_qid = {}
+    out = []
+    for raw in lines:
+        entry = parse_log_line(raw if isinstance(raw, str) else str(raw))
+        qid = entry['queue_id']
+        if qid and qid != 'NOQUEUE':
+            state = by_qid.setdefault(qid, {'from': '', 'to': '', 'relay': ''})
+            _merge_qid_state(state, entry)
+            _apply_qid_state(entry, state)
+        out.append(entry)
+    return out
+
+
+def read_maillog_tail(path, display_max=MAX_LOG_LINES, context_max=LOG_PARSE_CONTEXT_LINES):
+    if not os.path.exists(path):
+        return []
+    with open(path, 'r', errors='replace') as f:
+        raw_lines = list(deque(f, maxlen=context_max))
+    parsed = parse_maillog_lines(raw_lines)
+    if len(parsed) > display_max:
+        return parsed[-display_max:]
+    return parsed
 
 QUEUE_LINE_RE = re.compile(
     r'^(?P<qid>[A-F0-9]{6,20})(?P<flag>[*!])?\s+(?P<size>\d+)\s+'
@@ -871,28 +962,34 @@ def parse_mail_logs_for_stats(hours=24):
     relay_counts = Counter()
     sender_counts = Counter()
     hourly_counts = defaultdict(int)
-    with open(LOG_FILE, 'r') as f:
+    by_qid = {}
+    with open(LOG_FILE, 'r', errors='replace') as f:
         for line in f:
-            line = line.strip()
-            if 'status=sent' not in line and 'status=deferred' not in line:
-                continue
             parsed = parse_log_line(line)
+            qid = parsed['queue_id']
+            if qid and qid != 'NOQUEUE':
+                state = by_qid.setdefault(qid, {'from': '', 'to': '', 'relay': ''})
+                _merge_qid_state(state, parsed)
+                _apply_qid_state(parsed, state)
+            if parsed['status'] not in ('sent', 'deferred'):
+                continue
             if not parsed['timestamp']:
                 continue
             try:
-                ts = datetime.strptime(parsed['timestamp'], '%b %d %H:%M:%S')
+                ts = datetime.strptime(parsed['timestamp'][:15].strip(), '%b %d %H:%M:%S')
                 ts = ts.replace(year=datetime.now().year)
-                if ts > cutoff:
-                    relay = parsed['relay']
-                    if relay:
-                        relay_counts[relay] += 1
-                    sender = parsed['from']
-                    if sender:
-                        sender_counts[sender] += 1
-                    hour = ts.strftime('%Y-%m-%d %H:00')
-                    hourly_counts[hour] += 1
             except ValueError:
                 continue
+            if ts <= cutoff:
+                continue
+            relay = parsed['relay']
+            if relay:
+                relay_counts[relay] += 1
+            sender = parsed['from']
+            if sender:
+                sender_counts[sender] += 1
+            hour = ts.strftime('%Y-%m-%d %H:00')
+            hourly_counts[hour] += 1
     total = sum(relay_counts.values())
     return {
         'relay_counts': dict(relay_counts.most_common(10)),
@@ -1664,11 +1761,7 @@ def api_stats():
 @app.route('/logs')
 @login_required
 def view_logs():
-    lines = []
-    if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, 'r') as f:
-            lines = list(deque(f, maxlen=MAX_LOG_LINES))
-    parsed = [parse_log_line(line.strip()) for line in lines]
+    parsed = read_maillog_tail(LOG_FILE)
     from_filter = sanitize_input(request.args.get('from',''))
     to_filter = sanitize_input(request.args.get('to',''))
     status_filter = sanitize_input(request.args.get('status',''))
